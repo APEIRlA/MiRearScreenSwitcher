@@ -1,4 +1,22 @@
-# 鉴于小米3.8解锁节形势，加之shizuku限制实在过多，本项目无限期停更。
+> 🍴 **本仓库是 [AntiOblivionis/MiRearScreenSwitcher](https://github.com/AntiOblivionis/MiRearScreenSwitcher) 的 fork**。原仓库已归档停更，本 fork 发布 **Android 15+ / 澎湃 OS 3** 的修复版。
+>
+> **[⬇️ 下载修复版 APK — Release v3.2.1-android15](https://github.com/APEIRlA/MiRearScreenSwitcher/releases/tag/v3.2.1-android15)**
+>
+> ### 本 fork 的改动（提交 `54bf5b5`，基于上游 `7e0ae1a`）
+>
+> Android 15（API 35）起 AOSP 将 Task 体系重构为 RootTask：`moveTaskToDisplay` 被 `moveRootTaskToDisplay` 取代，binder transaction code 由 `50` 变为 `51`。原版硬编码 `service call activity_task 50 ...`，在新系统上会**静默**打到别的接口（不报错、也不移动任务），导致切换至背屏、返回主屏、充电动画投屏、通知投屏**全部失效**。
+>
+> - ✅ 新增 `DisplayCompat`：按 SDK_INT 自动选择正确的 transaction code（≤14 → `50`，≥15 → `51`）
+> - ✅ 收敛 7 处硬编码调用（TaskService / ChargingService / MainActivity / NotificationService / RearScreenChargingActivity）
+> - ✅ 新增 [ANDROID15-ROOT-TASK-FIX.md](ANDROID15-ROOT-TASK-FIX.md)：根因、复现方法、其它命令核对结果与实测记录
+> - ✅ 新增 `tools/android15-patch/`：手边没有 Flutter 工具链时，对已构建 APK 做 dex 级最小补丁的脚本
+> - 实测机型：小米 17 Pro Max / Android 16 / 澎湃 OS 3（SDK 36）
+>
+> ⚠️ Release 中的 APK 使用调试密钥签名（`CN=DSH Local`），与上游发布密钥不同，覆盖安装前需先卸载原版。
+>
+> **上游原作者声明（原仓库已归档）：**
+>
+> > 鉴于小米3.8解锁节形势，加之shizuku限制实在过多，本项目无限期停更。
 
 # MiRearScreenSwitcher (MRSS)
 
