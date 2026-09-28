@@ -317,7 +317,7 @@ public class RearScreenChargingActivity extends Activity {
                 
                 // 步骤3: 移动投送app回到背屏
                 taskService.executeShellCommand(
-                    "service call activity_task 50 i32 " + taskId + " i32 1"
+                    DisplayCompat.moveTaskCommand(taskId, 1)
                 );
                 
                 // 步骤4: 再等待200ms确保app已移动
@@ -327,7 +327,7 @@ public class RearScreenChargingActivity extends Activity {
                 
                 // 步骤5: 再次确认移动（双重保险）
                 taskService.executeShellCommand(
-                    "service call activity_task 50 i32 " + taskId + " i32 1"
+                    DisplayCompat.moveTaskCommand(taskId, 1)
                 );
                 
                 // 步骤6: 等待300ms让app完全显示
@@ -348,7 +348,7 @@ public class RearScreenChargingActivity extends Activity {
                 MainActivity mainActivity = MainActivity.getCurrentInstance();
                 if (mainActivity != null) {
                     mainActivity.executeShellCommand(
-                        "service call activity_task 50 i32 " + taskId + " i32 1"
+                        DisplayCompat.moveTaskCommand(taskId, 1)
                     );
                 }
             }

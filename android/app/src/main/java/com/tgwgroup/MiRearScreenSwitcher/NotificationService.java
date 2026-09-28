@@ -531,7 +531,7 @@ public class NotificationService extends NotificationListenerService {
                 
                 if (notifTaskId != null) {
                     // 4) 移动到背屏
-                    String moveCmd = "service call activity_task 50 i32 " + notifTaskId + " i32 1";
+                    String moveCmd = DisplayCompat.moveTaskCommand(notifTaskId, 1);
                     taskService.executeShellCommand(moveCmd);
                     try { Thread.sleep(60); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                     

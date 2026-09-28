@@ -444,7 +444,7 @@ public class ChargingService extends Service {
                 
                 if (chargingTaskId != null) {
                     // 4.3: 移动到背屏
-                    String moveCmd = "service call activity_task 50 i32 " + chargingTaskId + " i32 1";
+                    String moveCmd = DisplayCompat.moveTaskCommand(chargingTaskId, 1);
                     taskService.executeShellCommand(moveCmd);
                     Thread.sleep(40); // 等待移动完成
                     

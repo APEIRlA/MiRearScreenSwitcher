@@ -236,7 +236,7 @@ public class MainActivity extends FlutterActivity {
                 
                 if (notifTaskId != null) {
                     // 步骤5: 移动到背屏
-                    String moveCmd = "service call activity_task 50 i32 " + notifTaskId + " i32 1";
+                    String moveCmd = DisplayCompat.moveTaskCommand(notifTaskId, 1);
                     taskService.executeShellCommand(moveCmd);
                     Thread.sleep(40);
                     
