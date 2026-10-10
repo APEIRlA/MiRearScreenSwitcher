@@ -17,19 +17,15 @@ package com.tgwgroup.MiRearScreenSwitcher;
 
 import android.app.Service;
 import android.content.BroadcastReceiver;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.os.BatteryManager;
 import android.os.PowerManager;
 import android.os.IBinder;
 import android.os.Handler;
 import android.util.Log;
-
-import rikka.shizuku.Shizuku;
 
 /**
  * 充电状态监听服务
@@ -38,7 +34,6 @@ import rikka.shizuku.Shizuku;
 public class ChargingService extends Service {
     private static final String TAG = "ChargingService";
     private SharedPreferences prefs;
-    private ITaskService taskService;
     private PowerManager.WakeLock wakeLock;
     
     // 静态实例，供RearScreenChargingActivity访问
@@ -53,61 +48,6 @@ public class ChargingService extends Service {
     private Handler wakeupHandler;
     private Runnable wakeupRunnable;
     private boolean isWakeupRunning = false;
-    
-    public static ITaskService getTaskService() {
-        return instance != null ? instance.taskService : null;
-    }
-    
-    private final Shizuku.UserServiceArgs serviceArgs = 
-        new Shizuku.UserServiceArgs(new ComponentName("com.tgwgroup.MiRearScreenSwitcher", TaskService.class.getName()))
-            .daemon(false)
-            .processNameSuffix("charging_task_service")
-            .debuggable(false)
-            .version(1);
-    
-    private final ServiceConnection taskServiceConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder binder) {
-            Log.d(TAG, "✓ TaskService connected");
-            taskService = ITaskService.Stub.asInterface(binder);
-            
-            // 初始化显示屏信息缓存
-            try {
-                DisplayInfoCache.getInstance().initialize(taskService);
-            } catch (Exception e) {
-                Log.w(TAG, "初始化显示屏缓存失败: " + e.getMessage());
-            }
-        }
-        
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            Log.d(TAG, "✗ TaskService disconnected");
-            taskService = null;
-            // 自动重连
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                if (taskService == null) {
-                    bindTaskService();
-                }
-            }, 1000);
-        }
-    };
-    
-    // Shizuku监听器
-    private final Shizuku.OnBinderReceivedListener binderReceivedListener = 
-        () -> {
-            Log.d(TAG, "Shizuku binder received");
-            bindTaskService();
-        };
-    
-    private final Shizuku.OnBinderDeadListener binderDeadListener = 
-        () -> {
-            Log.d(TAG, "Shizuku binder dead");
-            taskService = null;
-            // 尝试重连
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                bindTaskService();
-            }, 1000);
-        };
     
     // V3.5: 设置变化广播接收器
     private BroadcastReceiver settingsReceiver = new BroadcastReceiver() {
@@ -225,10 +165,6 @@ public class ChargingService extends Service {
         
         prefs = getSharedPreferences("mrss_settings", Context.MODE_PRIVATE);
         
-        // 添加Shizuku监听器
-        Shizuku.addBinderReceivedListenerSticky(binderReceivedListener);
-        Shizuku.addBinderDeadListener(binderDeadListener);
-        
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_POWER_CONNECTED);
         filter.addAction(Intent.ACTION_POWER_DISCONNECTED);  // 监听拔电事件
@@ -253,9 +189,6 @@ public class ChargingService extends Service {
         // V3.5: 加载充电动画常亮设置
         chargingAlwaysOnEnabled = prefs.getBoolean("charging_always_on_enabled", false);
         wakeupHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-        
-        // 绑定TaskService
-        bindTaskService();
         
         // 启动前台服务保活（使用统一的内核服务通知）
         startForeground(NOTIFICATION_ID, RearScreenKeeperService.createServiceNotification(this));
@@ -296,32 +229,8 @@ public class ChargingService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d(TAG, "ChargingService started");
-        
-        // 确保TaskService已绑定
-        if (taskService == null) {
-            bindTaskService();
-        }
-        
+
         return START_STICKY;
-    }
-    
-    private void bindTaskService() {
-        try {
-            if (!Shizuku.pingBinder()) {
-                Log.w(TAG, "Shizuku not available");
-                return;
-            }
-            
-            if (Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                Log.w(TAG, "No Shizuku permission");
-                return;
-            }
-            
-            Shizuku.bindUserService(serviceArgs, taskServiceConnection);
-            Log.d(TAG, "Binding TaskService...");
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to bind TaskService", e);
-        }
     }
     
     private int getBatteryLevel(Context context) {
@@ -349,16 +258,16 @@ public class ChargingService extends Service {
     }
     
     private void showChargingOnRearScreenWithRetry(int level, boolean isLocked, int retryCount) {
-        if (taskService == null) {
+        if (!RootAccess.isAvailable()) {
             if (retryCount < 10) {  // 最多重试10次（总共1秒）
-                Log.w(TAG, "TaskService not available, retry " + (retryCount + 1) + "/10");
+                Log.w(TAG, "Root not available, retry " + (retryCount + 1) + "/10");
                 // 延迟重试
                 new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                     showChargingOnRearScreenWithRetry(level, isLocked, retryCount + 1);
                 }, 100);
                 return;
             } else {
-                Log.e(TAG, "TaskService still not available after 10 retries, aborting");
+                Log.e(TAG, "Root still not available after 10 retries, aborting");
                 return;
             }
         }
@@ -371,7 +280,7 @@ public class ChargingService extends Service {
             
             if (lastTask != null && lastTask.contains(":")) {
                 try {
-                    String rearForegroundApp = taskService.getForegroundAppOnDisplay(1);
+                    String rearForegroundApp = TaskService.getForegroundAppOnDisplay(1);
                     
                     // 如果当前背屏前台是充电动画，说明上一次动画还没完全销毁，使用lastTask
                     if (rearForegroundApp != null && rearForegroundApp.contains("RearScreenChargingActivity")) {
@@ -395,7 +304,7 @@ public class ChargingService extends Service {
             }
             
             // 步骤3: 禁用官方Launcher
-            taskService.disableSubScreenLauncher();
+            TaskService.disableSubScreenLauncher();
             
             long startTime = System.currentTimeMillis();
             Log.d(TAG, String.format("[%tT.%tL] 开始启动充电动画", startTime, startTime));
@@ -414,7 +323,7 @@ public class ChargingService extends Service {
                 );
                 
                 Log.d(TAG, String.format("[%tT.%tL] 🔵 在主屏启动Activity", System.currentTimeMillis(), System.currentTimeMillis()));
-                taskService.executeShellCommand(mainCmd);
+                TaskService.executeShellCommand(mainCmd);
                 
                 // 4.2: 轮询获取taskId（最多60次 x 30ms = 1800ms，期间重发命令）
                 String chargingTaskId = null;
@@ -423,7 +332,7 @@ public class ChargingService extends Service {
                 
                 while (chargingTaskId == null && attempts < maxAttempts) {
                     Thread.sleep(30);
-                    String result = taskService.executeShellCommandWithResult("am stack list | grep RearScreenChargingActivity");
+                    String result = TaskService.executeShellCommandWithResult("am stack list | grep RearScreenChargingActivity");
                     if (result != null && !result.trim().isEmpty()) {
                         // 解析 taskId=XXX
                         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("taskId=(\\d+)");
@@ -438,14 +347,14 @@ public class ChargingService extends Service {
                     attempts++;
                     if (attempts == 20 || attempts == 40) { // 中途重发一到两次启动命令
                         Log.d(TAG, String.format("[%tT.%tL] 重新发送主屏启动命令", System.currentTimeMillis(), System.currentTimeMillis()));
-                        taskService.executeShellCommand(mainCmd);
+                        TaskService.executeShellCommand(mainCmd);
                     }
                 }
                 
                 if (chargingTaskId != null) {
                     // 4.3: 移动到背屏
-                    String moveCmd = DisplayCompat.moveTaskCommand(chargingTaskId, 1);
-                    taskService.executeShellCommand(moveCmd);
+                    String moveCmd = DisplayCompat.moveTaskCommand(Integer.parseInt(chargingTaskId), 1);
+                    TaskService.executeShellCommand(moveCmd);
                     Thread.sleep(40); // 等待移动完成
                     
                     // 4.4: 只在锁屏时关闭主屏（亮屏时不需要关闭）
@@ -486,14 +395,6 @@ public class ChargingService extends Service {
         // 清除静态实例
         instance = null;
         
-        // 移除Shizuku监听器
-        try {
-            Shizuku.removeBinderReceivedListener(binderReceivedListener);
-            Shizuku.removeBinderDeadListener(binderDeadListener);
-        } catch (Exception e) {
-            Log.e(TAG, "Error removing Shizuku listeners", e);
-        }
-        
         try {
             unregisterReceiver(batteryReceiver);
         } catch (Exception e) {
@@ -516,16 +417,6 @@ public class ChargingService extends Service {
         
         // V3.5: 停止唤醒循环
         stopWakeupLoop();
-        
-        // 解绑TaskService
-        try {
-            if (taskService != null) {
-                Shizuku.unbindUserService(serviceArgs, taskServiceConnection, true);
-                taskService = null;
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error unbinding TaskService", e);
-        }
     }
     
     @Override
@@ -557,12 +448,8 @@ public class ChargingService extends Service {
                 
                 // 发送wakeup命令
                 try {
-                    if (taskService != null) {
-                        taskService.executeShellCommand("input -d 1 keyevent KEYCODE_WAKEUP");
-                        Log.d(TAG, "✓ Wakeup sent");
-                    } else {
-                        Log.w(TAG, "⚠️ TaskService is null, skipping wakeup");
-                    }
+                    TaskService.executeShellCommand("input -d 1 keyevent KEYCODE_WAKEUP");
+                    Log.d(TAG, "✓ Wakeup sent");
                 } catch (Throwable t) {
                     Log.w(TAG, "发送wakeup失败: " + t.getMessage());
                 }

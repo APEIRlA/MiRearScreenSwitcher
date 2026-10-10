@@ -1,7 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <!-- Shizuku权限（关键！） -->
-    <uses-permission android:name="moe.shizuku.manager.permission.API_V23"/>
     <!-- 唤醒锁权限 -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <!-- Overlay权限（用于保持背屏常亮Activity可见 + 录屏悬浮窗） -->
@@ -28,21 +26,6 @@
             android:name="miui.rear.policy"
             android:value="1"/>
             
-        <!-- Shizuku Provider（重要！） -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="com.tgwgroup.MiRearScreenSwitcher.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-        
-        <!-- 自定义Shizuku Service -->
-        <service
-            android:name=".TaskService"
-            android:permission="moe.shizuku.manager.permission.API_V23"
-            android:exported="true" />
-        
         <!-- Quick Settings Tile - 切换至背屏 -->
         <service
             android:name=".SwitchToRearTileService"

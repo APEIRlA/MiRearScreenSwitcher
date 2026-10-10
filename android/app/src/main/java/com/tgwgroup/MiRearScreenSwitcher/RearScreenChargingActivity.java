@@ -304,46 +304,44 @@ public class RearScreenChargingActivity extends Activity {
     
     private void restoreProjectedApp(int taskId) {
         try {
-            // 通过ChargingService获取TaskService并恢复投送的app
-            ITaskService taskService = ChargingService.getTaskService();
-            if (taskService != null) {
+            // 以root权限恢复投送的app
+            if (RootAccess.isAvailable()) {
                 // 步骤1: 先禁用官方Launcher（防止它抢占背屏）
-                taskService.disableSubScreenLauncher();
-                
+                TaskService.disableSubScreenLauncher();
+
                 // 步骤2: 等待200ms让系统稳定（增加延迟）
                 try {
                     Thread.sleep(200);
                 } catch (InterruptedException ignored) {}
-                
+
                 // 步骤3: 移动投送app回到背屏
-                taskService.executeShellCommand(
+                TaskService.executeShellCommand(
                     DisplayCompat.moveTaskCommand(taskId, 1)
                 );
-                
+
                 // 步骤4: 再等待200ms确保app已移动
                 try {
                     Thread.sleep(200);
                 } catch (InterruptedException ignored) {}
-                
+
                 // 步骤5: 再次确认移动（双重保险）
-                taskService.executeShellCommand(
+                TaskService.executeShellCommand(
                     DisplayCompat.moveTaskCommand(taskId, 1)
                 );
-                
+
                 // 步骤6: 等待300ms让app完全显示
                 try {
                     Thread.sleep(300);
                 } catch (InterruptedException ignored) {}
-                
+
                 // 步骤7: 不启用官方Launcher（保持禁用状态，让投送app继续占据背屏）
-                // taskService.enableSubScreenLauncher(); // ❌ 不要启用，否则会抢占背屏
-                
+
                 // 步骤8: 重新启动RearScreenKeeperService来监控恢复的app
                 restartKeeperService(taskId);
-                
+
                 Log.d(TAG, "✅ Projected app restored (taskId=" + taskId + ")");
             } else {
-                Log.w(TAG, "TaskService not available from ChargingService");
+                Log.w(TAG, "Root not available");
                 // 回退到MainActivity
                 MainActivity mainActivity = MainActivity.getCurrentInstance();
                 if (mainActivity != null) {
@@ -390,15 +388,14 @@ public class RearScreenChargingActivity extends Activity {
     
     private void restoreOfficialLauncher() {
         try {
-            // 通过ChargingService获取TaskService并恢复官方Launcher
-            ITaskService taskService = ChargingService.getTaskService();
-            if (taskService != null) {
-                taskService.executeShellCommand(
+            // 以root权限恢复官方Launcher
+            if (RootAccess.isAvailable()) {
+                TaskService.executeShellCommand(
                     "am start --display 1 -n com.xiaomi.subscreencenter/.subscreenlauncher.SubScreenLauncherActivity"
                 );
                 Log.d(TAG, "✅ Official launcher restored");
             } else {
-                Log.w(TAG, "TaskService not available from ChargingService");
+                Log.w(TAG, "Root not available");
                 // 回退到MainActivity
                 MainActivity mainActivity = MainActivity.getCurrentInstance();
                 if (mainActivity != null) {
@@ -424,39 +421,29 @@ public class RearScreenChargingActivity extends Activity {
             // 如果缓存未初始化，立即执行dumpsys获取真实DPI
             if (rearScreenDpi <= 0) {
                 Log.w(TAG, "⚠️ 背屏DPI未缓存，尝试实时获取");
-                
-                // 尝试获取TaskService（带重试机制）
-                ITaskService taskService = null;
+
+                // 尝试初始化缓存（带重试机制）
+                boolean initialized = false;
                 for (int retry = 0; retry < 3; retry++) {
-                    taskService = ChargingService.getTaskService();
-                    if (taskService == null) {
-                        taskService = NotificationService.getTaskService();
-                    }
-                    
-                    if (taskService != null) {
+                    if (RootAccess.isAvailable()) {
+                        DisplayInfoCache.getInstance().initialize();
+                        info = DisplayInfoCache.getInstance().getCachedInfo();
+                        rearScreenDpi = info.densityDpi;
+                        initialized = true;
+                        Log.d(TAG, "✅ 实时获取背屏DPI: " + rearScreenDpi);
                         break;
                     }
-                    
-                    Log.w(TAG, String.format("⏳ TaskService未连接，重试 %d/3", retry + 1));
+
+                    Log.w(TAG, String.format("⏳ Root未授权，重试 %d/3", retry + 1));
                     try {
                         Thread.sleep(200);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
                 }
-                
-                if (taskService != null) {
-                    try {
-                        DisplayInfoCache.getInstance().initialize(taskService);
-                        info = DisplayInfoCache.getInstance().getCachedInfo();
-                        rearScreenDpi = info.densityDpi;
-                        Log.d(TAG, "✅ 实时获取背屏DPI: " + rearScreenDpi);
-                    } catch (Exception e) {
-                        Log.e(TAG, "❌ 实时获取背屏DPI失败", e);
-                        return;
-                    }
-                } else {
-                    Log.e(TAG, "❌ TaskService重试3次后仍不可用，跳过DPI强制");
+
+                if (!initialized) {
+                    Log.e(TAG, "❌ Root重试3次后仍不可用，跳过DPI强制");
                     return;
                 }
             }

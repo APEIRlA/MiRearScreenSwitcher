@@ -16,19 +16,15 @@
 package com.tgwgroup.MiRearScreenSwitcher;
 
 import android.app.IntentService;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.IBinder;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.widget.Toast;
-import rikka.shizuku.Shizuku;
 
 /**
  * V2.6: URI命令处理服务
@@ -38,27 +34,6 @@ import rikka.shizuku.Shizuku;
 public class UriCommandService extends IntentService {
     private static final String TAG = "UriCommandService";
 
-    private ITaskService taskService;
-    private final Shizuku.UserServiceArgs serviceArgs = new Shizuku.UserServiceArgs(
-            new ComponentName("com.tgwgroup.MiRearScreenSwitcher", TaskService.class.getName()))
-            .daemon(false)
-            .processNameSuffix("task_service")
-            .debuggable(false)
-            .version(1);
-
-    private final ServiceConnection taskServiceConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder binder) {
-            taskService = ITaskService.Stub.asInterface(binder);
-            Log.d(TAG, "✓ TaskService已连接");
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            taskService = null;
-        }
-    };
-
     public UriCommandService() {
         super("UriCommandService");
     }
@@ -66,7 +41,6 @@ public class UriCommandService extends IntentService {
     @Override
     public void onCreate() {
         super.onCreate();
-        bindTaskService();
     }
 
     @Override
@@ -108,45 +82,7 @@ public class UriCommandService extends IntentService {
     }
 
     private boolean ensureTaskServiceConnected() {
-        if (taskService != null)
-            return true;
-
-        try {
-            bindTaskService();
-
-            // 等待连接（最多3秒）
-            int attempts = 0;
-            while (taskService == null && attempts < 30) {
-                Thread.sleep(100);
-                attempts++;
-            }
-
-            return taskService != null;
-        } catch (Exception e) {
-            Log.e(TAG, "TaskService重连失败", e);
-            return false;
-        }
-    }
-
-    private void bindTaskService() {
-        if (taskService != null)
-            return;
-
-        try {
-            if (!Shizuku.pingBinder()) {
-                Log.e(TAG, "Shizuku不可用");
-                return;
-            }
-
-            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                Log.e(TAG, "无Shizuku权限");
-                return;
-            }
-
-            Shizuku.bindUserService(serviceArgs, taskServiceConnection);
-        } catch (Exception e) {
-            Log.e(TAG, "绑定TaskService失败", e);
-        }
+        return RootAccess.isAvailable();
     }
 
     /**
@@ -160,7 +96,7 @@ public class UriCommandService extends IntentService {
         try {
             // 0. 检查背屏是否已有应用在运行（拒绝重复投放）
             try {
-                String rearForegroundApp = taskService.getForegroundAppOnDisplay(1);
+                String rearForegroundApp = TaskService.getForegroundAppOnDisplay(1);
                 Log.d(TAG, "背屏前台应用: " + rearForegroundApp);
 
                 if (rearForegroundApp != null && !rearForegroundApp.isEmpty()) {
@@ -190,6 +126,19 @@ public class UriCommandService extends IntentService {
             String activity = uri.getQueryParameter("activity");
 
             Log.d(TAG, "参数 - current: " + currentParam + ", packageName: " + packageName + ", activity: " + activity);
+
+            // ⚠️ 安全校验（必做）：mrss:// 是对外开放的（UriReceiverActivity 无权限保护），
+            // 任何应用都能构造这些查询参数。它们随后会被拼进以 root（su）执行的 shell
+            // 命令，若不做白名单校验，攻击者可用 $(...)、反引号、分号等注入任意 root 命令。
+            // 校验不通过一律丢弃，不做"清理后继续"。
+            if (packageName != null && !ShellCompat.checkPackageName(packageName, "mrss://switch")) {
+                showToast("参数不合法：packageName");
+                return;
+            }
+            if (activity != null && !ShellCompat.checkComponent(activity, "mrss://switch")) {
+                showToast("参数不合法：activity");
+                return;
+            }
 
             if ("true".equalsIgnoreCase(currentParam) || "1".equals(currentParam)) {
                 // 切换当前应用 - 完全复用TileService逻辑
@@ -230,7 +179,7 @@ public class UriCommandService extends IntentService {
                     String oldPackageName = oldParts[0];
 
                     // 检查旧应用是否还在背屏
-                    String rearForegroundApp = taskService.getForegroundAppOnDisplay(1);
+                    String rearForegroundApp = TaskService.getForegroundAppOnDisplay(1);
                     if (rearForegroundApp != null && rearForegroundApp.equals(lastMovedTask)) {
                         // 背屏已有应用在运行，禁止操作
                         String oldAppName = getAppName(oldPackageName);
@@ -244,7 +193,7 @@ public class UriCommandService extends IntentService {
 
             // 额外检查：确保背屏没有其他用户应用
             try {
-                String rearForegroundApp = taskService.getForegroundAppOnDisplay(1);
+                String rearForegroundApp = TaskService.getForegroundAppOnDisplay(1);
                 if (rearForegroundApp != null && !rearForegroundApp.isEmpty()) {
                     // 排除允许的进程
                     if (!rearForegroundApp.contains("RearScreenChargingActivity") &&
@@ -261,13 +210,13 @@ public class UriCommandService extends IntentService {
 
             // 步骤1: 禁用系统背屏Launcher（关键！防止挤占）
             try {
-                taskService.disableSubScreenLauncher();
+                TaskService.disableSubScreenLauncher();
             } catch (Exception e) {
                 Log.w(TAG, "Failed to disable SubScreenLauncher", e);
             }
 
             // 步骤2: 获取当前前台应用
-            String currentApp = taskService.getCurrentForegroundApp();
+            String currentApp = TaskService.getCurrentForegroundApp();
 
             // 步骤3: 立即启动前台Service（让通知快速出现）
             Intent serviceIntent = new Intent(this, RearScreenKeeperService.class);
@@ -296,29 +245,20 @@ public class UriCommandService extends IntentService {
                 int taskId = Integer.parseInt(parts[1]);
 
                 // 步骤4: 切换到display 1 (背屏)
-                boolean success = taskService.moveTaskToDisplay(taskId, 1);
+                boolean success = TaskService.moveTaskToDisplay(taskId, 1);
 
                 if (success) {
                     Log.d(TAG, "✅ Task已移动到背屏 (taskId=" + taskId + ")");
 
                     // 步骤5: 主动点亮背屏 (通过TaskService启动Activity，绕过BAL限制) - 关键步骤！
                     try {
-                        if (taskService != null) {
-                            try {
-                                boolean launchResult = taskService.launchWakeActivity(1);
-                                if (!launchResult) {
-                                    Log.w(TAG, "TaskService launch failed, fallback to shell");
-                                    // Fallback: shell命令启动
-                                    String cmd = "am start --display 1 -n com.tgwgroup.MiRearScreenSwitcher/"
-                                            + RearScreenWakeupActivity.class.getName();
-                                    taskService.executeShellCommand(cmd);
-                                }
-                            } catch (NoSuchMethodError e) {
-                                // 旧版本TaskService没有launchWakeActivity，使用shell命令
-                                String cmd = "am start --display 1 -n com.tgwgroup.MiRearScreenSwitcher/"
-                                        + RearScreenWakeupActivity.class.getName();
-                                taskService.executeShellCommand(cmd);
-                            }
+                        boolean launchResult = TaskService.launchWakeActivity(1);
+                        if (!launchResult) {
+                            Log.w(TAG, "TaskService launch failed, fallback to shell");
+                            // Fallback: shell命令启动
+                            String cmd = "am start --display 1 -n com.tgwgroup.MiRearScreenSwitcher/"
+                                    + RearScreenWakeupActivity.class.getName();
+                            TaskService.executeShellCommand(cmd);
                         }
                     } catch (Exception e) {
                         Log.w(TAG, "Failed to launch wake activity: " + e.getMessage());
@@ -349,7 +289,7 @@ public class UriCommandService extends IntentService {
             applyConfigParams(uri);
 
             // 步骤1: 禁用系统背屏Launcher
-            taskService.disableSubScreenLauncher();
+            TaskService.disableSubScreenLauncher();
             Thread.sleep(100);
 
             // 步骤1.5: 清理目标应用的旧task（如果存在）- 防止获取到旧task
@@ -365,7 +305,8 @@ public class UriCommandService extends IntentService {
                 try {
                     Log.d(TAG, "→ 检查并清理旧task: " + targetPackageName);
                     // 尝试强制停止应用（清理所有task）
-                    taskService.executeShellCommand("am force-stop " + targetPackageName);
+                    // 参数已通过白名单校验，这里再包一层单引号，杜绝任何残留的解释面
+                    TaskService.executeShellCommand("am force-stop " + ShellCompat.quote(targetPackageName));
                     Thread.sleep(300);
                     Log.d(TAG, "✓ 已清理旧task");
                 } catch (Exception e) {
@@ -376,39 +317,42 @@ public class UriCommandService extends IntentService {
             // 步骤2: 在主屏启动应用（先在主屏启动，才能获取taskId）
             String launchCmd;
             if (activity != null) {
-                launchCmd = "am start -n " + activity;
+                launchCmd = "am start -n " + ShellCompat.quote(activity);
                 Log.d(TAG, "→ 使用指定Activity启动: " + activity);
             } else {
                 // 使用pm命令获取主Activity，比monkey更可靠
-                launchCmd = "cmd package resolve-activity --brief " + packageName + " | tail -n 1";
-                String mainActivity = taskService.executeShellCommandWithResult(launchCmd);
+                launchCmd = "cmd package resolve-activity --brief " + ShellCompat.quote(packageName) + " | tail -n 1";
+                String mainActivity = TaskService.executeShellCommandWithResult(launchCmd);
 
                 if (mainActivity != null && !mainActivity.trim().isEmpty()
-                        && !mainActivity.contains("No activity found")) {
+                        && !mainActivity.contains("No activity found")
+                        && ShellCompat.isValidComponent(mainActivity.trim())) {
                     mainActivity = mainActivity.trim();
-                    launchCmd = "am start -n " + mainActivity;
+                    launchCmd = "am start -n " + ShellCompat.quote(mainActivity);
                     Log.d(TAG, "→ 解析到主Activity: " + mainActivity);
                 } else {
                     // Fallback: 使用pm dump获取主Activity
-                    launchCmd = "pm dump " + packageName + " | grep -A 1 'android.intent.action.MAIN' | grep -o '"
+                    launchCmd = "pm dump " + ShellCompat.quote(packageName)
+                            + " | grep -A 1 'android.intent.action.MAIN' | grep -o '"
                             + packageName + "[^\\s]*' | head -n 1";
-                    mainActivity = taskService.executeShellCommandWithResult(launchCmd);
+                    mainActivity = TaskService.executeShellCommandWithResult(launchCmd);
 
-                    if (mainActivity != null && !mainActivity.trim().isEmpty()) {
+                    if (mainActivity != null && !mainActivity.trim().isEmpty()
+                            && ShellCompat.isValidComponent(mainActivity.trim())) {
                         mainActivity = mainActivity.trim();
-                        launchCmd = "am start -n " + mainActivity;
+                        launchCmd = "am start -n " + ShellCompat.quote(mainActivity);
                         Log.d(TAG, "→ 通过pm dump解析到主Activity: " + mainActivity);
                     } else {
                         // 最后的Fallback: 使用Intent方式启动
                         launchCmd = "am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "
-                                + packageName;
+                                + ShellCompat.quote(packageName);
                         Log.w(TAG, "→ 使用Intent方式启动（未能解析主Activity）");
                     }
                 }
             }
 
             Log.d(TAG, "→ 执行启动命令: " + launchCmd);
-            taskService.executeShellCommand(launchCmd);
+            TaskService.executeShellCommand(launchCmd);
             Log.d(TAG, "✓ 启动命令已执行");
 
             // 步骤3: 等待应用启动并验证，最多重试3次
@@ -420,7 +364,7 @@ public class UriCommandService extends IntentService {
             for (int retry = 0; retry < maxRetries; retry++) {
                 Thread.sleep(500 + retry * 200); // 首次500ms，之后递增
 
-                targetApp = taskService.getCurrentForegroundApp();
+                targetApp = TaskService.getCurrentForegroundApp();
                 Log.d(TAG, "  尝试 " + (retry + 1) + "/" + maxRetries + " 获取前台应用: " + targetApp);
 
                 if (targetApp == null || !targetApp.contains(":")) {
@@ -454,10 +398,11 @@ public class UriCommandService extends IntentService {
                     if (retry < maxRetries - 1) {
                         Log.w(TAG, "  强制停止当前应用并重新启动目标应用");
                         // 先停止错误的应用
-                        taskService.executeShellCommand("am force-stop " + actualPackage);
+                        // actualPackage 来自命令输出解析，可能不可信，同样包单引号
+                        TaskService.executeShellCommand("am force-stop " + ShellCompat.quote(actualPackage));
                         Thread.sleep(200);
                         // 重新执行启动命令
-                        taskService.executeShellCommand(launchCmd);
+                        TaskService.executeShellCommand(launchCmd);
                         continue;
                     } else {
                         Log.e(TAG, "  ❌ 多次重试后仍然无法启动目标应用");
@@ -498,7 +443,7 @@ public class UriCommandService extends IntentService {
 
             // 步骤5: 移动到背屏
             Log.d(TAG, "→ 步骤5: 移动Task到背屏 (taskId=" + taskId + ")");
-            boolean success = taskService.moveTaskToDisplay(taskId, 1);
+            boolean success = TaskService.moveTaskToDisplay(taskId, 1);
 
             if (success) {
                 Log.d(TAG, "✅ Task已移动到背屏 (taskId=" + taskId + ")");
@@ -514,11 +459,11 @@ public class UriCommandService extends IntentService {
                         int dpi = Integer.parseInt(dpiStr);
                         Log.d(TAG, "→ 再次验证DPI并应用: " + dpi);
                         // 验证当前DPI
-                        int currentDpi = taskService.getCurrentRearDpi();
+                        int currentDpi = TaskService.getCurrentRearDpi();
                         Log.d(TAG, "  当前背屏DPI: " + currentDpi);
                         if (currentDpi != dpi) {
                             Log.w(TAG, "  DPI不匹配，重新设置");
-                            taskService.setRearDpi(dpi);
+                            TaskService.setRearDpi(dpi);
                             Thread.sleep(200);
                         } else {
                             Log.d(TAG, "  ✓ DPI已生效");
@@ -531,19 +476,19 @@ public class UriCommandService extends IntentService {
                 // 步骤6: 主动点亮背屏（关键步骤！）
                 Log.d(TAG, "→ 步骤6: 点亮背屏");
                 try {
-                    boolean launchResult = taskService.launchWakeActivity(1);
+                    boolean launchResult = TaskService.launchWakeActivity(1);
                     if (!launchResult) {
                         Log.w(TAG, "TaskService launch failed, fallback to shell");
                         String cmd = "am start --display 1 -n com.tgwgroup.MiRearScreenSwitcher/"
                                 + RearScreenWakeupActivity.class.getName();
-                        taskService.executeShellCommand(cmd);
+                        TaskService.executeShellCommand(cmd);
                     }
                     Log.d(TAG, "✓ 背屏已点亮");
                 } catch (NoSuchMethodError e) {
                     // 旧版本兼容
                     String cmd = "am start --display 1 -n com.tgwgroup.MiRearScreenSwitcher/"
                             + RearScreenWakeupActivity.class.getName();
-                    taskService.executeShellCommand(cmd);
+                    TaskService.executeShellCommand(cmd);
                     Log.d(TAG, "✓ 背屏已点亮（旧版本fallback）");
                 } catch (Exception e) {
                     Log.w(TAG, "Failed to launch wake activity: " + e.getMessage());
@@ -560,25 +505,25 @@ public class UriCommandService extends IntentService {
                         Thread.sleep(500);
 
                         // 验证旋转是否生效
-                        int currentRotation = taskService.getDisplayRotation(1);
+                        int currentRotation = TaskService.getDisplayRotation(1);
                         Log.d(TAG, "  目标旋转: " + targetRotation + ", 当前旋转: " + currentRotation);
 
                         if (currentRotation != targetRotation) {
                             Log.w(TAG, "  ⚠ 旋转不匹配，重新设置");
-                            taskService.setDisplayRotation(1, targetRotation);
+                            TaskService.setDisplayRotation(1, targetRotation);
                             Thread.sleep(500); // 等待重新设置生效
                         } else {
                             Log.d(TAG, "  ✓ 旋转已生效");
                         }
 
                         // 检查应用是否还在背屏（可能被旋转杀死）
-                        boolean stillOnRear = taskService.isTaskOnDisplay(taskId, 1);
+                        boolean stillOnRear = TaskService.isTaskOnDisplay(taskId, 1);
                         Log.d(TAG, "  应用是否还在背屏: " + stillOnRear);
 
                         if (!stillOnRear) {
                             // 应用被旋转杀死了，重新投放
                             Log.w(TAG, "  ⚠ 应用因旋转被杀，重新投放");
-                            taskService.moveTaskToDisplay(taskId, 1);
+                            TaskService.moveTaskToDisplay(taskId, 1);
                             Thread.sleep(200);
                             Log.d(TAG, "  ✓ 应用已复活");
                         } else {
@@ -621,7 +566,7 @@ public class UriCommandService extends IntentService {
             String targetPackage = null;
 
             if ("true".equalsIgnoreCase(currentParam) || "1".equals(currentParam)) {
-                String rearApp = taskService.getForegroundAppOnDisplay(1);
+                String rearApp = TaskService.getForegroundAppOnDisplay(1);
                 if (rearApp != null && rearApp.contains(":")) {
                     String[] parts = rearApp.split(":");
                     targetPackage = parts[0];
@@ -630,12 +575,12 @@ public class UriCommandService extends IntentService {
             } else if (taskIdStr != null) {
                 targetTaskId = Integer.parseInt(taskIdStr);
                 // 尝试从背屏前台应用获取包名
-                String rearApp = taskService.getForegroundAppOnDisplay(1);
+                String rearApp = TaskService.getForegroundAppOnDisplay(1);
                 if (rearApp != null && rearApp.contains(":")) {
                     targetPackage = rearApp.split(":")[0];
                 }
             } else if (packageName != null) {
-                String rearApp = taskService.getForegroundAppOnDisplay(1);
+                String rearApp = TaskService.getForegroundAppOnDisplay(1);
                 if (rearApp != null && rearApp.startsWith(packageName + ":")) {
                     targetPackage = packageName;
                     targetTaskId = Integer.parseInt(rearApp.split(":")[1]);
@@ -644,18 +589,18 @@ public class UriCommandService extends IntentService {
 
             if (targetTaskId != -1) {
                 // 检查任务是否真的在背屏
-                boolean onRear = taskService.isTaskOnDisplay(targetTaskId, 1);
+                boolean onRear = TaskService.isTaskOnDisplay(targetTaskId, 1);
 
                 if (onRear) {
                     String appName = getAppName(targetPackage != null ? targetPackage : String.valueOf(targetTaskId));
 
                     // 步骤1: 拉回主屏
-                    taskService.moveTaskToDisplay(targetTaskId, 0);
+                    TaskService.moveTaskToDisplay(targetTaskId, 0);
                     Log.d(TAG, "✅ 已拉回主屏 (taskId=" + targetTaskId + ")");
 
                     // 步骤2: 恢复官方Launcher（关键！）
                     try {
-                        taskService.enableSubScreenLauncher();
+                        TaskService.enableSubScreenLauncher();
                         Log.d(TAG, "✓ Launcher已恢复");
                     } catch (Exception e) {
                         Log.w(TAG, "恢复Launcher失败: " + e.getMessage());
@@ -689,7 +634,7 @@ public class UriCommandService extends IntentService {
      */
     private void handleScreenshot() {
         try {
-            boolean success = taskService.takeRearScreenshot();
+            boolean success = TaskService.takeRearScreenshot();
 
             // 无论成功失败都显示成功Toast
             Log.d(TAG, "✅ 截图命令已执行");
@@ -725,40 +670,54 @@ public class UriCommandService extends IntentService {
             String dpiStr = uri.getQueryParameter("dpi");
             Log.d(TAG, "DPI参数: " + dpiStr);
 
-            if (dpiStr != null) {
+            // 安全校验：只接受纯数字，再做范围限制，避免异常值与超长输入
+            if (dpiStr != null && ShellCompat.isValidInteger(dpiStr)) {
                 int dpi = Integer.parseInt(dpiStr);
-                Log.d(TAG, "→ 调用 taskService.setRearDpi(" + dpi + ")");
-
-                // 直接调用TaskService.setRearDpi - 完全照抄MainActivity逻辑
-                boolean success = taskService.setRearDpi(dpi);
-
-                if (success) {
-                    Log.d(TAG, "✅ DPI设置成功: " + dpi);
+                if (dpi < 100 || dpi > 1000) {
+                    Log.w(TAG, "拒绝越界 DPI: " + dpi);
+                    dpiStr = null;
                 } else {
-                    Log.e(TAG, "❌ DPI设置失败（TaskService返回false）");
+                    Log.d(TAG, "→ 调用 TaskService.setRearDpi(" + dpi + ")");
+
+                    // 直接调用TaskService.setRearDpi - 完全照抄MainActivity逻辑
+                    boolean success = TaskService.setRearDpi(dpi);
+
+                    if (success) {
+                        Log.d(TAG, "✅ DPI设置成功: " + dpi);
+                    } else {
+                        Log.e(TAG, "❌ DPI设置失败（TaskService返回false）");
+                    }
                 }
-            } else {
-                Log.d(TAG, "→ 跳过DPI设置（无参数）");
+            }
+            if (dpiStr == null) {
+                Log.d(TAG, "→ 跳过DPI设置（无参数或参数非法）");
             }
 
             String rotationStr = uri.getQueryParameter("rotation");
             Log.d(TAG, "旋转参数: " + rotationStr);
 
-            if (rotationStr != null) {
+            // 安全校验：rotation 只接受 0-3（与 adb shell 语义一致）
+            if (rotationStr != null && ShellCompat.isValidInteger(rotationStr)) {
                 int rotation = Integer.parseInt(rotationStr);
-                Log.d(TAG, "→ 调用 taskService.setDisplayRotation(1, " + rotation + ")");
-
-                // 直接调用TaskService.setDisplayRotation - 完全照抄MainActivity逻辑
-                // TaskService内部会自动处理：等待500ms + 检查应用 + 复活
-                boolean success = taskService.setDisplayRotation(1, rotation);
-
-                if (success) {
-                    Log.d(TAG, "✅ 旋转设置成功: " + rotation);
+                if (rotation < 0 || rotation > 3) {
+                    Log.w(TAG, "拒绝越界 rotation: " + rotation);
+                    rotationStr = null;
                 } else {
-                    Log.e(TAG, "❌ 旋转设置失败（TaskService返回false）");
+                    Log.d(TAG, "→ 调用 TaskService.setDisplayRotation(1, " + rotation + ")");
+
+                    // 直接调用TaskService.setDisplayRotation - 完全照抄MainActivity逻辑
+                    // TaskService内部会自动处理：等待500ms + 检查应用 + 复活
+                    boolean success = TaskService.setDisplayRotation(1, rotation);
+
+                    if (success) {
+                        Log.d(TAG, "✅ 旋转设置成功: " + rotation);
+                    } else {
+                        Log.e(TAG, "❌ 旋转设置失败（TaskService返回false）");
+                    }
                 }
-            } else {
-                Log.d(TAG, "→ 跳过旋转设置（无参数）");
+            }
+            if (rotationStr == null) {
+                Log.d(TAG, "→ 跳过旋转设置（无参数或参数非法）");
             }
 
             Log.d(TAG, "🔧 配置参数应用完成");
@@ -794,14 +753,5 @@ public class UriCommandService extends IntentService {
     @Override
     public void onDestroy() {
         super.onDestroy();
-
-        if (taskService != null) {
-            try {
-                Shizuku.unbindUserService(serviceArgs, taskServiceConnection, true);
-            } catch (Exception e) {
-                Log.e(TAG, "解绑TaskService失败", e);
-            }
-            taskService = null;
-        }
     }
 }

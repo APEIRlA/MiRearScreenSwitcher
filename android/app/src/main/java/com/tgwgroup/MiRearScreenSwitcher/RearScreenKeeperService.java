@@ -20,10 +20,8 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -40,7 +38,6 @@ import android.os.RemoteException;
 import android.util.Log;
 import android.widget.Toast;
 import androidx.core.app.NotificationCompat;
-import rikka.shizuku.Shizuku;
 
 /**
  * 前台Service - 保持背屏常亮
@@ -60,7 +57,6 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
     private static RearScreenKeeperService instance = null;
     private PowerManager.WakeLock wakeLock;
     private Handler handler;
-    private ITaskService taskService = null;
 
     // V12.3: 初始杀进程策略 - 只杀1次，不持续监控
     private static final int INITIAL_KILL_COUNT = 1; // 初始杀1次
@@ -137,7 +133,7 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
         if (intent != null && "ACTION_RETURN_TO_MAIN".equals(intent.getAction())) {
 
             // 将监控的任务移回主屏
-            if (monitoredTaskInfo != null && monitoredTaskInfo.contains(":") && taskService != null) {
+            if (monitoredTaskInfo != null && monitoredTaskInfo.contains(":") && RootAccess.isAvailable()) {
                 try {
                     String[] parts = monitoredTaskInfo.split(":");
                     String packageName = parts[0];
@@ -146,7 +142,7 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
                     // 获取应用名
                     String appName = getAppName(packageName);
 
-                    taskService.moveTaskToDisplay(taskId, 0);
+                    TaskService.moveTaskToDisplay(taskId, 0);
 
                     // 先移除前台通知
                     stopForeground(Service.STOP_FOREGROUND_REMOVE);
@@ -234,9 +230,6 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
 
             // 在后台线程执行耗时操作，不阻塞通知显示
             new Thread(() -> {
-                // 绑定Shizuku TaskService
-                bindTaskService();
-
                 // 初始化接近传感器
                 initProximitySensor();
             }).start();
@@ -289,10 +282,10 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
                 return;
             }
 
-            if (monitoredTaskInfo != null && taskService != null) {
+            if (monitoredTaskInfo != null && RootAccess.isAvailable()) {
                 try {
                     // V15.2: 检查背屏(displayId=1)的前台应用是否还是我们监控的应用
-                    String rearForegroundApp = taskService.getForegroundAppOnDisplay(1);
+                    String rearForegroundApp = TaskService.getForegroundAppOnDisplay(1);
 
                     // V2.3: 排除充电动画/通知动画（临时占用背屏，不应导致Service销毁）
                     if (rearForegroundApp != null && (rearForegroundApp.contains("RearScreenChargingActivity")
@@ -336,10 +329,12 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
         @Override
         public void run() {
             // 检查开关状态
-            if (keepScreenOnEnabled && taskService != null) {
+            if (keepScreenOnEnabled && RootAccess.isAvailable()) {
                 try {
                     // 向背屏(displayId=1)发送WAKEUP唤醒信号
-                    taskService.executeShellCommand("input -d 1 keyevent KEYCODE_WAKEUP");
+                    // 走 submit（独立常驻会话、投递即返回）：这是 0.5 秒一次的高频
+                    // 保活命令，若与用户切屏共用主锁会造成切屏延迟与命令积压。
+                    ShellExecutor.submit("input -d 1 keyevent KEYCODE_WAKEUP");
                     // Log.d(TAG, "✨ 背屏保活唤醒已发送"); // 注释掉以减少日志
                 } catch (Exception e) {
                     Log.w(TAG, "背屏唤醒失败: " + e.getMessage());
@@ -372,14 +367,14 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
             handler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    if (taskService != null) {
+                    if (RootAccess.isAvailable()) {
                         try {
-                            taskService.killLauncherProcess();
+                            TaskService.killLauncherProcess();
                         } catch (Exception e) {
                             Log.w(TAG, "⚠ Kill #" + killNumber + " failed: " + e.getMessage());
                         }
                     } else {
-                        Log.w(TAG, "⚠ TaskService not available for kill #" + killNumber);
+                        Log.w(TAG, "⚠ Root not available for kill #" + killNumber);
                     }
 
                     // 最后一次杀完后的总结
@@ -392,99 +387,6 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
                     }
                 }
             }, i * KILL_INTERVAL_MS);
-        }
-    }
-
-    /**
-     * Shizuku TaskService连接回调
-     */
-    private final ServiceConnection taskServiceConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder binder) {
-            taskService = ITaskService.Stub.asInterface(binder);
-
-            // 取消重连任务（如果存在）
-            if (handler != null) {
-                handler.removeCallbacks(reconnectTaskServiceRunnable);
-            }
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            Log.w(TAG, "⚠ TaskService disconnected - will attempt to reconnect");
-            taskService = null;
-
-            // 启动重连任务
-            scheduleReconnectTaskService();
-        }
-    };
-
-    /**
-     * TaskService重连任务
-     */
-    private final Runnable reconnectTaskServiceRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (taskService == null) {
-                bindTaskService();
-
-                // 如果重连失败，1秒后再次尝试
-                handler.postDelayed(this, 1000);
-            } else {
-            }
-        }
-    };
-
-    /**
-     * 安排TaskService重连
-     */
-    private void scheduleReconnectTaskService() {
-        if (handler != null) {
-            handler.postDelayed(reconnectTaskServiceRunnable, 300);
-        }
-    };
-
-    /**
-     * 绑定Shizuku TaskService
-     */
-    private void bindTaskService() {
-        if (taskService != null) {
-            return;
-        }
-
-        try {
-            Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(
-                    new ComponentName(getPackageName(), TaskService.class.getName()))
-                    .daemon(false)
-                    .processNameSuffix("task_service")
-                    .debuggable(false)
-                    .version(1);
-
-            Shizuku.bindUserService(args, taskServiceConnection);
-        } catch (Exception e) {
-            Log.e(TAG, "✗ Failed to bind TaskService", e);
-        }
-    }
-
-    /**
-     * 解绑TaskService
-     */
-    private void unbindTaskService() {
-        if (taskService != null) {
-            try {
-                Shizuku.unbindUserService(
-                        new Shizuku.UserServiceArgs(
-                                new ComponentName(getPackageName(), TaskService.class.getName()))
-                                .daemon(false)
-                                .processNameSuffix("task_service")
-                                .debuggable(false)
-                                .version(1),
-                        taskServiceConnection,
-                        true);
-            } catch (Exception e) {
-                Log.w(TAG, "Failed to unbind TaskService", e);
-            }
-            taskService = null;
         }
     }
 
@@ -504,11 +406,11 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
         }
 
         // V12.2: 恢复并主动唤醒Launcher
-        if (taskService != null) {
+        if (RootAccess.isAvailable()) {
             try {
 
                 // 1. 恢复Launcher（unsuspend）
-                taskService.enableSubScreenLauncher();
+                TaskService.enableSubScreenLauncher();
 
                 // 2. 短暂延迟，确保unsuspend生效
                 Thread.sleep(300);
@@ -519,9 +421,6 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
                 Log.w(TAG, "Failed to restore launcher", e);
             }
         }
-
-        // 解绑TaskService
-        unbindTaskService();
 
         // 释放WakeLock
         if (wakeLock != null && wakeLock.isHeld()) {
@@ -829,7 +728,7 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
         Log.w(TAG, "═══════════════════════════════════════");
 
         try {
-            if (taskService != null) {
+            if (RootAccess.isAvailable()) {
                 // 获取最后移动的任务信息
                 String lastTask = SwitchToRearTileService.getLastMovedTask();
 
@@ -842,7 +741,7 @@ public class RearScreenKeeperService extends Service implements SensorEventListe
                     String appName = getAppName(packageName);
 
                     // 拉回主屏
-                    boolean success = taskService.moveTaskToDisplay(taskId, 0);
+                    boolean success = TaskService.moveTaskToDisplay(taskId, 0);
 
                     if (success) {
                         // 延迟显示Toast

@@ -19,11 +19,9 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.BroadcastReceiver;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -31,15 +29,12 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
 import android.os.PowerManager;
-import android.os.IBinder;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
 
 import java.util.HashSet;
 import java.util.Set;
-
-import rikka.shizuku.Shizuku;
 
 /**
  * 通知监听服务
@@ -56,7 +51,6 @@ public class NotificationService extends NotificationListenerService {
     private boolean onlyWhenLocked = false; // 仅倒扣手机时通知（默认关闭）
     private boolean notificationDarkMode = false; // 通知暗夜模式（默认关闭）
     private boolean serviceEnabled = false; // 服务是否启用
-    private ITaskService taskService; // 自己的TaskService实例
     private SharedPreferences prefs;
     private PowerManager.WakeLock wakeLock;
     
@@ -67,10 +61,6 @@ public class NotificationService extends NotificationListenerService {
     
     // 静态实例，供外部访问
     private static NotificationService instance;
-    
-    public static ITaskService getTaskService() {
-        return instance != null ? instance.taskService : null;
-    }
     
     // 广播接收器：监听设置重新加载
     private BroadcastReceiver settingsReceiver = new BroadcastReceiver() {
@@ -83,59 +73,6 @@ public class NotificationService extends NotificationListenerService {
             }
         }
     };
-    
-    // Shizuku服务配置
-    private final Shizuku.UserServiceArgs serviceArgs = 
-        new Shizuku.UserServiceArgs(new ComponentName("com.tgwgroup.MiRearScreenSwitcher", TaskService.class.getName()))
-            .daemon(false)
-            .processNameSuffix("notification_task_service")
-            .debuggable(false)
-            .version(1);
-    
-    // TaskService连接
-    private final ServiceConnection taskServiceConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder binder) {
-            Log.d(TAG, "✓ TaskService connected");
-            taskService = ITaskService.Stub.asInterface(binder);
-            
-            // 初始化显示屏信息缓存
-            try {
-                DisplayInfoCache.getInstance().initialize(taskService);
-            } catch (Exception e) {
-                Log.w(TAG, "初始化显示屏缓存失败: " + e.getMessage());
-            }
-        }
-        
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            Log.d(TAG, "✗ TaskService disconnected");
-            taskService = null;
-            // 自动重连
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                if (taskService == null) {
-                    bindTaskService();
-                }
-            }, 1000);
-        }
-    };
-    
-    // Shizuku监听器
-    private final Shizuku.OnBinderReceivedListener binderReceivedListener = 
-        () -> {
-            Log.d(TAG, "Shizuku binder received");
-            bindTaskService();
-        };
-    
-    private final Shizuku.OnBinderDeadListener binderDeadListener = 
-        () -> {
-            Log.d(TAG, "Shizuku binder dead");
-            taskService = null;
-            // 尝试重连
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                bindTaskService();
-            }, 1000);
-        };
     
     @Override
     public void onCreate() {
@@ -157,13 +94,6 @@ public class NotificationService extends NotificationListenerService {
         }
         Log.d(TAG, "✓ 广播接收器已注册");
         
-        // 添加Shizuku监听器
-        Shizuku.addBinderReceivedListenerSticky(binderReceivedListener);
-        Shizuku.addBinderDeadListener(binderDeadListener);
-        
-        // 绑定TaskService
-        bindTaskService();
-        
         // V2.4: 加载通知服务开关状态
         Log.d(TAG, "🔧 开始加载通知服务开关状态...");
         loadNotificationServiceSettings();
@@ -177,25 +107,6 @@ public class NotificationService extends NotificationListenerService {
         Log.d(TAG, "✓ 前台服务已启动");
         
         loadSettings();
-    }
-    
-    private void bindTaskService() {
-        try {
-            if (taskService != null) {
-                Log.d(TAG, "TaskService already bound");
-                return;
-            }
-            
-            if (!Shizuku.pingBinder()) {
-                Log.w(TAG, "Shizuku not available");
-                return;
-            }
-            
-            Log.d(TAG, "🔗 开始绑定TaskService...");
-            Shizuku.bindUserService(serviceArgs, taskServiceConnection);
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to bind TaskService", e);
-        }
     }
     
     /**
@@ -382,9 +293,8 @@ public class NotificationService extends NotificationListenerService {
     
     private void showNotificationOnRearScreen(String packageName, String title, String text, long when) {
         // 参考ChargingService的重试机制
-        if (taskService == null) {
-            Log.w(TAG, "⚠️ TaskService未连接，尝试重新绑定...");
-            bindTaskService();
+        if (!RootAccess.isAvailable()) {
+            Log.w(TAG, "⚠️ Root未授权，延迟重试...");
             
             // 延迟500ms后重试
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
@@ -397,8 +307,8 @@ public class NotificationService extends NotificationListenerService {
     
     private void showNotificationOnRearScreenDirect(String packageName, String title, String text, long when) {
         try {
-            if (taskService == null) {
-                Log.e(TAG, "❌ TaskService仍然不可用，放弃显示通知");
+            if (!RootAccess.isAvailable()) {
+                Log.e(TAG, "❌ Root仍然不可用，放弃显示通知");
                 return;
             }
             
@@ -413,7 +323,7 @@ public class NotificationService extends NotificationListenerService {
             // 读取主屏前台应用（用于同包名前台场景的保护）
             String mainForegroundApp = null;
             try {
-                mainForegroundApp = taskService.getForegroundAppOnDisplay(0);
+                mainForegroundApp = TaskService.getForegroundAppOnDisplay(0);
                 Log.d(TAG, "📱 主屏前台应用: " + mainForegroundApp);
             } catch (Throwable t) {
                 Log.w(TAG, "获取主屏前台应用失败: " + t.getMessage());
@@ -430,7 +340,7 @@ public class NotificationService extends NotificationListenerService {
             
             try {
                 // 禁用背屏官方Launcher，避免抢占
-                taskService.disableSubScreenLauncher();
+                TaskService.disableSubScreenLauncher();
             } catch (Throwable t) {
                 Log.w(TAG, "disableSubScreenLauncher failed: " + t.getMessage());
             }
@@ -461,12 +371,15 @@ public class NotificationService extends NotificationListenerService {
             notificationDarkMode = prefs.getBoolean("notification_dark_mode", false);
             Log.d(TAG, "🌙 当前暗夜模式设置: " + notificationDarkMode);
             
+            // ⚠️ 安全：通知标题/内容来自任意应用，且本命令以 root 执行。
+            // 双引号无法阻止 $()/反引号 的命令替换，因此必须用单引号字面量
+            // （ShellCompat.quote 会把内部的 ' 正确转义）。
             String directCmd = String.format(
-                "am start --display 1 -n %s --es packageName \"%s\" --es title \"%s\" --es text \"%s\" --el when %d --ez darkMode %b",
+                "am start --display 1 -n %s --es packageName %s --es title %s --es text %s --el when %d --ez darkMode %b",
                 componentName,
-                packageName,
-                title.replace("\"", "\\\""),
-                text.replace("\"", "\\\""),
+                ShellCompat.quote(packageName),
+                ShellCompat.quote(title),
+                ShellCompat.quote(text),
                 when,
                 notificationDarkMode
             );
@@ -475,13 +388,13 @@ public class NotificationService extends NotificationListenerService {
             // 尝试3次直接启动，确保成功
             for (int retry = 0; retry < 3; retry++) {
                 try {
-                    taskService.executeShellCommand(directCmd);
+                    TaskService.executeShellCommand(directCmd);
                     Log.d(TAG, String.format("✓ %s，直接在背屏启动通知Activity (尝试%d)",
                         isLocked ? "锁屏状态" : "非锁屏状态", retry + 1));
                     try { Thread.sleep(150); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                     
                     // 检查是否启动成功
-                    String check = taskService.executeShellCommandWithResult("am stack list | grep RearScreenNotificationActivity");
+                    String check = TaskService.executeShellCommandWithResult("am stack list | grep RearScreenNotificationActivity");
                     if (check != null && !check.trim().isEmpty()) {
                         started = true;
                         Log.d(TAG, "✓ 通知动画已在背屏启动");
@@ -498,16 +411,16 @@ public class NotificationService extends NotificationListenerService {
                 
                 // 主屏启动（Activity 自行占位）
                 String startOnMainCmd = String.format(
-                    "am start -n %s --es packageName \"%s\" --es title \"%s\" --es text \"%s\" --el when %d --ez darkMode %b",
+                    "am start -n %s --es packageName %s --es title %s --es text %s --el when %d --ez darkMode %b",
                     componentName,
-                    packageName,
-                    title.replace("\"", "\\\""),
-                    text.replace("\"", "\\\""),
+                    ShellCompat.quote(packageName),
+                    ShellCompat.quote(title),
+                    ShellCompat.quote(text),
                     when,
                     notificationDarkMode
                 );
                 Log.d(TAG, "🔵 在主屏启动通知Activity（占位符）");
-                taskService.executeShellCommand(startOnMainCmd);
+                TaskService.executeShellCommand(startOnMainCmd);
                 try { Thread.sleep(50); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                 
                 // 轮询获取taskId
@@ -516,7 +429,7 @@ public class NotificationService extends NotificationListenerService {
                 int maxAttempts = 60;
                 while (notifTaskId == null && attempts < maxAttempts) {
                     try { Thread.sleep(40); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                    String result = taskService.executeShellCommandWithResult("am stack list | grep RearScreenNotificationActivity");
+                    String result = TaskService.executeShellCommandWithResult("am stack list | grep RearScreenNotificationActivity");
                     if (result != null && !result.trim().isEmpty()) {
                         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("taskId=(\\d+)");
                         java.util.regex.Matcher matcher = pattern.matcher(result);
@@ -531,8 +444,8 @@ public class NotificationService extends NotificationListenerService {
                 
                 if (notifTaskId != null) {
                     // 4) 移动到背屏
-                    String moveCmd = DisplayCompat.moveTaskCommand(notifTaskId, 1);
-                    taskService.executeShellCommand(moveCmd);
+                    String moveCmd = DisplayCompat.moveTaskCommand(Integer.parseInt(notifTaskId), 1);
+                    TaskService.executeShellCommand(moveCmd);
                     try { Thread.sleep(60); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
                     
                     // 5) 锁屏时关闭主屏，避免主屏抢焦点
@@ -552,7 +465,7 @@ public class NotificationService extends NotificationListenerService {
                             when,
                             notificationDarkMode
                         );
-                        taskService.executeShellCommand(fallbackCmd);
+                        TaskService.executeShellCommand(fallbackCmd);
                         Log.d(TAG, "🟦 已尝试直接 --display 1 启动通知Activity（fallback）");
                     } catch (Throwable t) {
                         Log.w(TAG, "Fallback直接在背屏启动失败: " + t.getMessage());
@@ -723,24 +636,6 @@ public class NotificationService extends NotificationListenerService {
             Log.d(TAG, "✓ 广播接收器已注销");
         } catch (Exception e) {
             Log.w(TAG, "Failed to unregister receiver", e);
-        }
-        
-        // 移除Shizuku监听器
-        try {
-            Shizuku.removeBinderReceivedListener(binderReceivedListener);
-            Shizuku.removeBinderDeadListener(binderDeadListener);
-        } catch (Exception e) {
-            Log.w(TAG, "Failed to remove Shizuku listeners", e);
-        }
-        
-        // 解绑TaskService
-        try {
-            if (taskService != null) {
-                Shizuku.unbindUserService(serviceArgs, taskServiceConnection, true);
-                taskService = null;
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "Failed to unbind TaskService", e);
         }
         
         // 注销主屏接近传感器

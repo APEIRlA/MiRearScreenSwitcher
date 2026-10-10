@@ -1,18 +1,21 @@
-> 🍴 **本仓库是 [AntiOblivionis/MiRearScreenSwitcher](https://github.com/AntiOblivionis/MiRearScreenSwitcher) 的 fork**。原仓库已归档停更，本 fork 发布 **Android 15+ / 澎湃 OS 3** 的修复版。
+> 🍴 **本仓库是 [AntiOblivionis/MiRearScreenSwitcher](https://github.com/AntiOblivionis/MiRearScreenSwitcher) 的 fork**。原仓库已归档停更，本 fork 发布 **基于 ROOT 权限**的版本，同时适配 **Android 15+ / 澎湃 OS 3**。
 >
-> **[⬇️ 下载修复版 APK — Release v3.2.1-android15](https://github.com/APEIRlA/MiRearScreenSwitcher/releases/tag/v3.2.1-android15)**
+> ### 与上游的主要区别
 >
-> ### 本 fork 的改动（提交 `54bf5b5`，基于上游 `7e0ae1a`）
+> **不再依赖 Shizuku，改为直接使用 ROOT 权限。**
 >
-> Android 15（API 35）起 AOSP 将 Task 体系重构为 RootTask：`moveTaskToDisplay` 被 `moveRootTaskToDisplay` 取代，binder transaction code 由 `50` 变为 `51`。原版硬编码 `service call activity_task 50 ...`，在新系统上会**静默**打到别的接口（不报错、也不移动任务），导致切换至背屏、返回主屏、充电动画投屏、通知投屏**全部失效**。
+> 上游版本基于 Shizuku（shell 权限）执行特权命令，需要额外安装并常驻 Shizuku、通过 ADB 或无线调试授权。本版本改为通过 `su` 以 root 身份执行，首次使用授权一次即可，无需 Shizuku、无需 ADB。
 >
-> - ✅ 新增 `DisplayCompat`：按 SDK_INT 自动选择正确的 transaction code（≤14 → `50`，≥15 → `51`）
-> - ✅ 收敛 7 处硬编码调用（TaskService / ChargingService / MainActivity / NotificationService / RearScreenChargingActivity）
-> - ✅ 新增 [ANDROID15-ROOT-TASK-FIX.md](ANDROID15-ROOT-TASK-FIX.md)：根因、复现方法、其它命令核对结果与实测记录
-> - ✅ 新增 `tools/android15-patch/`：手边没有 Flutter 工具链时，对已构建 APK 做 dex 级最小补丁的脚本
+> - ✅ 移除 Shizuku 依赖（gradle 依赖、AIDL 接口、Manifest provider 全部清理）
+> - ✅ 新增 `RootAccess`：root 可用性检测，结果缓存避免重复 fork
+> - ✅ 新增 `ShellExecutor`：常驻 root shell 会话，命令串行执行；只在建立会话时触发一次授权提示，避免后台高频命令反复弹窗
+> - ✅ 原 AIDL 服务（`ITaskService`，21 个方法）改造为静态工具类，各进程直接调用
+> - ✅ 适配 Android 15+ / 澎湃 OS 3 的 Task→RootTask 重构（`DisplayCompat` 按 SDK 自动选择 binder transaction code）
 > - 实测机型：小米 17 Pro Max / Android 16 / 澎湃 OS 3（SDK 36）
 >
-> ⚠️ Release 中的 APK 使用调试密钥签名（`CN=DSH Local`），与上游发布密钥不同，覆盖安装前需先卸载原版。
+> ### 使用前提
+>
+> 设备需已获取 ROOT 权限（Magisk / KernelSU / SuperSU 等）。首次打开应用时会弹出授权框，授予即可；root 管理器会记住授权。
 >
 > **上游原作者声明（原仓库已归档）：**
 >
@@ -45,7 +48,7 @@
 - ⚡ **充电动画**: 插电时在背屏显示精美的充电动画（3D闪电+流动液体效果）
 - 📢 **通知推送**: 收到通知时自动在背屏显示通知内容（支持应用选择+隐私模式+动态重载）
 - 🔓 **后台可用**: 即使应用在后台也能正常触发切换
-- 🚀 **无需ROOT**: 基于Shizuku实现，无需ROOT权限
+- 🚀 **基于ROOT**: 通过su执行特权命令，首次使用授权一次即可
 - 🎨 **精致UI**: Material 3设计，四色渐变UI，精确2.84超椭圆圆角
 - 🛡️ **智能保护**: 防止系统Launcher覆盖投射的应用
 - 💡 **背屏常亮**: 可选的背屏常亮功能，防止自动息屏
@@ -61,17 +64,16 @@
 ## 📋 使用前提
 
 1. **设备要求**: 支持背屏的小米手机（小米17Pro/17Pro Max等双屏设备）
-2. **Shizuku**: 需要安装并启动Shizuku
-   - 下载地址: [Shizuku官网](https://shizuku.rikka.app/)
-   - 启动方式: ADB或无线调试
+2. **ROOT**: 需要已获取ROOT权限（Magisk/KernelSU/SuperSU等）
+   - 首次使用时会弹出授权框，授予即可（root管理器会记住授权）
 
 ## 🚀 使用方法
 
 ### 1. 初次设置
 
 1. 安装MRSS应用
-2. 确保Shizuku已启动
-3. 打开MRSS应用，授予Shizuku权限
+2. 确保设备已获取ROOT权限
+3. 打开MRSS应用，授予root权限
 4. 等待状态显示"一切就绪"
 
 ### 2. 添加快捷开关
@@ -130,7 +132,7 @@
 ## 🔧 技术实现
 
 - **Flutter**: 跨平台UI框架，Material 3设计，四色渐变+精确超椭圆圆角
-- **Shizuku**: 提供shell权限执行特权操作
+- **ROOT**: 通过su提供shell权限执行特权操作（RootAccess检测+ShellExecutor执行）
 - **Quick Settings Tile**: Android系统级快捷开关服务（切换/截图/录屏）
 - **ActivityTaskManager**: 通过system service调用实现显示切换
 - **Foreground Service + WakeLock**: 前台服务持有唤醒锁，可选的背屏常亮
@@ -148,7 +150,6 @@
 
 ## 📝 权限说明
 
-- `moe.shizuku.manager.permission.API_V23`: Shizuku API权限，用于执行特权操作
 - `android.permission.WAKE_LOCK`: 保持背屏常亮
 - `android.permission.FOREGROUND_SERVICE`: 前台服务权限
 - `android.permission.POST_NOTIFICATIONS`: 通知权限（Android 13+）
@@ -386,7 +387,6 @@ flutter build apk --release --split-per-abi --target-platform android-arm64
 
 ## 🙏 致谢
 
-- [Shizuku](https://github.com/RikkaApps/Shizuku) - 提供特权API支持
 - Flutter团队 - 优秀的跨平台框架
 - Xiaomi HyperOS 小米澎湃OS团队 - 小米手机背屏功能
 
@@ -404,7 +404,7 @@ flutter build apk --release --split-per-abi --target-platform android-arm64
 
 ### 免责声明
 
-本应用为开源项目，基于Shizuku实现背屏功能扩展，仅供学习交流使用。使用本应用即表示您理解并同意：
+本应用为开源项目，基于ROOT权限实现背屏功能扩展，仅供学习交流使用。使用本应用即表示您理解并同意：
 - 本应用非小米官方应用，与小米公司无任何关联
 - 使用本应用的风险由用户自行承担
 - 开发者不对使用本应用造成的任何损失负责

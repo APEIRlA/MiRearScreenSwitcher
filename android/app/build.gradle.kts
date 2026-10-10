@@ -17,6 +17,7 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "com.tgwgroup.MiRearScreenSwitcher"
     compileSdk = flutter.compileSdkVersion
+    // shared_preferences_android 等插件要求 NDK；与 Flutter 默认保持一致
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -30,15 +31,10 @@ android {
 
     defaultConfig {
         applicationId = "com.tgwgroup.MiRearScreenSwitcher"
-        minSdk = 24  // Shizuku需要最低24
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-    }
-    
-    // Shizuku需要
-    buildFeatures {
-        aidl = true
     }
     
     lint {
@@ -81,8 +77,3 @@ flutter {
     source = "../.."
 }
 
-dependencies {
-    // Shizuku API
-    implementation("dev.rikka.shizuku:api:13.1.5")
-    implementation("dev.rikka.shizuku:provider:13.1.5")
-}

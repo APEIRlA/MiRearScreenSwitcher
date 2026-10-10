@@ -48,15 +48,15 @@ public class DisplayInfoCache {
     /**
      * 初始化缓存（在应用启动时调用一次）
      */
-    public synchronized void initialize(ITaskService taskService) {
+    public synchronized void initialize() {
         if (initialized) {
             Log.d(TAG, "ℹ️ 已初始化，跳过");
             return;
         }
-        
+
         try {
             Log.d(TAG, "🔄 开始获取背屏信息...");
-            cachedInfo = RearDisplayHelper.getRearDisplayInfo(taskService);
+            cachedInfo = RearDisplayHelper.getRearDisplayInfo();
             initialized = true;
             
             Log.d(TAG, String.format("✅ 背屏信息已缓存: %dx%d, DPI=%d, Cutout=%s",
@@ -95,9 +95,9 @@ public class DisplayInfoCache {
     /**
      * 强制重新获取（用于刷新缓存）
      */
-    public synchronized void refresh(ITaskService taskService) {
+    public synchronized void refresh() {
         initialized = false;
-        initialize(taskService);
+        initialize();
     }
     
     /**

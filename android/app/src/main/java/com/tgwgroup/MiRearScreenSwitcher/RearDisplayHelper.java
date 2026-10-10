@@ -58,19 +58,14 @@ public class RearDisplayHelper {
     }
     
     /**
-     * 获取背屏信息（通过TaskService）
+     * 获取背屏信息（通过 TaskService 静态方法，root 权限执行）
      */
-    public static RearDisplayInfo getRearDisplayInfo(ITaskService taskService) {
+    public static RearDisplayInfo getRearDisplayInfo() {
         RearDisplayInfo info = new RearDisplayInfo();
-        
-        if (taskService == null) {
-            Log.w(TAG, "⚠️ TaskService为null，使用默认背屏信息");
-            return info;
-        }
-        
+
         try {
             // 执行 dumpsys display 命令
-            String result = taskService.executeShellCommandWithResult("dumpsys display");
+            String result = TaskService.executeShellCommandWithResult("dumpsys display");
             if (result == null || result.isEmpty()) {
                 Log.w(TAG, "⚠️ dumpsys display返回为空，使用默认背屏信息");
                 return info;

@@ -223,11 +223,8 @@ public class RearScreenNotificationActivity extends Activity {
                         Log.d(TAG, String.format("[%tT.%tL] 🚀 尝试ActivityOptions在display=0(主屏)启动", clickTime, clickTime));
                         // 点亮主屏
                         try {
-                            ITaskService tsWake = NotificationService.getTaskService();
-                            if (tsWake != null) {
-                                tsWake.executeShellCommand("// 主屏唤醒功能已移除");
-                                Log.d(TAG, String.format("[%tT.%tL] ✓ 已唤醒主屏", clickTime, clickTime));
-                            }
+                            TaskService.executeShellCommand("// 主屏唤醒功能已移除");
+                            Log.d(TAG, String.format("[%tT.%tL] ✓ 已唤醒主屏", clickTime, clickTime));
                         } catch (Throwable ignored) {}
                         startActivity(launchIntent, opts.toBundle());
                         started = true;
@@ -257,26 +254,21 @@ public class RearScreenNotificationActivity extends Activity {
                         }
                         Log.d(TAG, String.format("[%tT.%tL] 🧭 解析到组件: %s", clickTime, clickTime, String.valueOf(component)));
                         if (component != null) {
-                            ITaskService ts = NotificationService.getTaskService();
-                            if (ts != null) {
-                                // 先唤醒主屏
-                                try {
-                                    ts.executeShellCommand("// 主屏唤醒功能已移除");
-                                    Log.d(TAG, String.format("[%tT.%tL] ✓ 已唤醒主屏", clickTime, clickTime));
-                                } catch (Throwable ignored) {}
-                                String cmd = "am start --display 0 -n " + component;
-                                boolean ok = ts.executeShellCommand(cmd);
-                                if (!ok) {
-                                    // 有些ROM不支持 --display 0，退化为默认显示
-                                    cmd = "am start -n " + component;
-                                    ok = ts.executeShellCommand(cmd);
-                                    Log.d(TAG, String.format("[%tT.%tL] 🔁 改为默认显示启动，结果=%s", clickTime, clickTime, ok));
-                                }
-                                Log.d(TAG, String.format("[%tT.%tL] ✓ Fallback shell主屏启动%s 组件=%s", clickTime, clickTime, ok ? "成功" : "失败", component));
-                                started = ok;
-                            } else {
-                                Log.w(TAG, String.format("[%tT.%tL] ⚠️ TaskService为空，无法shell启动", clickTime, clickTime));
+                            // 先唤醒主屏
+                            try {
+                                TaskService.executeShellCommand("// 主屏唤醒功能已移除");
+                                Log.d(TAG, String.format("[%tT.%tL] ✓ 已唤醒主屏", clickTime, clickTime));
+                            } catch (Throwable ignored) {}
+                            String cmd = "am start --display 0 -n " + component;
+                            boolean ok = TaskService.executeShellCommand(cmd);
+                            if (!ok) {
+                                // 有些ROM不支持 --display 0，退化为默认显示
+                                cmd = "am start -n " + component;
+                                ok = TaskService.executeShellCommand(cmd);
+                                Log.d(TAG, String.format("[%tT.%tL] 🔁 改为默认显示启动，结果=%s", clickTime, clickTime, ok));
                             }
+                            Log.d(TAG, String.format("[%tT.%tL] ✓ Fallback shell主屏启动%s 组件=%s", clickTime, clickTime, ok ? "成功" : "失败", component));
+                            started = ok;
                         }
                     } catch (Throwable t) {
                         Log.w(TAG, String.format("[%tT.%tL] Fallback shell start 异常: %s", clickTime, clickTime, t.getMessage()));
@@ -519,11 +511,8 @@ public class RearScreenNotificationActivity extends Activity {
                                 Log.d(TAG, String.format("[%tT.%tL] 🚀 尝试ActivityOptions在display=0(主屏)启动", clickTime, clickTime));
                                 // 点亮主屏
                                 try {
-                                    ITaskService tsWake = NotificationService.getTaskService();
-                                    if (tsWake != null) {
-                                        tsWake.executeShellCommand("// 主屏唤醒功能已移除");
-                                        Log.d(TAG, String.format("[%tT.%tL] ✓ 已唤醒主屏", clickTime, clickTime));
-                                    }
+                                    TaskService.executeShellCommand("// 主屏唤醒功能已移除");
+                                    Log.d(TAG, String.format("[%tT.%tL] ✓ 已唤醒主屏", clickTime, clickTime));
                                 } catch (Throwable ignored) {}
                                 startActivity(launchIntent, opts.toBundle());
                                 started = true;
@@ -553,25 +542,20 @@ public class RearScreenNotificationActivity extends Activity {
                                 }
                                 Log.d(TAG, String.format("[%tT.%tL] 🧭 解析到组件: %s", clickTime, clickTime, String.valueOf(component)));
                                 if (component != null) {
-                                    ITaskService ts = NotificationService.getTaskService();
-                                    if (ts != null) {
-                                        // 先唤醒主屏
-                                        try {
-                                            ts.executeShellCommand("// 主屏唤醒功能已移除");
-                                            Log.d(TAG, String.format("[%tT.%tL] ✓ 已唤醒主屏", clickTime, clickTime));
-                                        } catch (Throwable ignored) {}
-                                        String cmd = "am start --display 0 -n " + component;
-                                        boolean ok = ts.executeShellCommand(cmd);
-                                        if (!ok) {
-                                            cmd = "am start -n " + component;
-                                            ok = ts.executeShellCommand(cmd);
-                                            Log.d(TAG, String.format("[%tT.%tL] 🔁 改为默认显示启动，结果=%s", clickTime, clickTime, ok));
-                                        }
-                                        Log.d(TAG, String.format("[%tT.%tL] ✓ Fallback shell主屏启动%s 组件=%s", clickTime, clickTime, ok ? "成功" : "失败", component));
-                                        started = ok;
-                                    } else {
-                                        Log.w(TAG, String.format("[%tT.%tL] ⚠️ TaskService为空，无法shell启动", clickTime, clickTime));
+                                    // 先唤醒主屏
+                                    try {
+                                        TaskService.executeShellCommand("// 主屏唤醒功能已移除");
+                                        Log.d(TAG, String.format("[%tT.%tL] ✓ 已唤醒主屏", clickTime, clickTime));
+                                    } catch (Throwable ignored) {}
+                                    String cmd = "am start --display 0 -n " + component;
+                                    boolean ok = TaskService.executeShellCommand(cmd);
+                                    if (!ok) {
+                                        cmd = "am start -n " + component;
+                                        ok = TaskService.executeShellCommand(cmd);
+                                        Log.d(TAG, String.format("[%tT.%tL] 🔁 改为默认显示启动，结果=%s", clickTime, clickTime, ok));
                                     }
+                                    Log.d(TAG, String.format("[%tT.%tL] ✓ Fallback shell主屏启动%s 组件=%s", clickTime, clickTime, ok ? "成功" : "失败", component));
+                                    started = ok;
                                 }
                             } catch (Throwable t) {
                                 Log.w(TAG, String.format("[%tT.%tL] Fallback shell start 异常: %s", clickTime, clickTime, t.getMessage()));
@@ -671,15 +655,14 @@ public class RearScreenNotificationActivity extends Activity {
             if (currentDisplayId == 1) {
                 new Thread(() -> {
                     try {
-                        // 通过ChargingService获取TaskService（NotificationService也绑定了）
-                        ITaskService taskService = ChargingService.getTaskService();
-                        if (taskService != null) {
-                            taskService.executeShellCommand(
+                        // 以root权限在背屏恢复官方Launcher
+                        if (RootAccess.isAvailable()) {
+                            TaskService.executeShellCommand(
                                 "am start --display 1 -n com.xiaomi.mirror/.SubscreenLauncher"
                             );
                             Log.d(TAG, "✓ Official launcher restored");
                         } else {
-                            Log.w(TAG, "TaskService not available");
+                            Log.w(TAG, "Root not available");
                         }
                     } catch (Exception e) {
                         Log.e(TAG, "Failed to restore launcher", e);
@@ -708,39 +691,29 @@ public class RearScreenNotificationActivity extends Activity {
             // 如果缓存未初始化，立即执行dumpsys获取真实DPI
             if (rearScreenDpi <= 0) {
                 Log.w(TAG, "⚠️ 背屏DPI未缓存，尝试实时获取");
-                
-                // 尝试获取TaskService（带重试机制）
-                ITaskService taskService = null;
+
+                // 尝试初始化缓存（带重试机制）
+                boolean initialized = false;
                 for (int retry = 0; retry < 3; retry++) {
-                    taskService = NotificationService.getTaskService();
-                    if (taskService == null) {
-                        taskService = ChargingService.getTaskService();
-                    }
-                    
-                    if (taskService != null) {
+                    if (RootAccess.isAvailable()) {
+                        DisplayInfoCache.getInstance().initialize();
+                        info = DisplayInfoCache.getInstance().getCachedInfo();
+                        rearScreenDpi = info.densityDpi;
+                        initialized = true;
+                        Log.d(TAG, "✓ 实时获取背屏DPI: " + rearScreenDpi);
                         break;
                     }
-                    
-                    Log.w(TAG, String.format("⚠️ TaskService未连接，重试 %d/3", retry + 1));
+
+                    Log.w(TAG, String.format("⚠️ Root未授权，重试 %d/3", retry + 1));
                     try {
                         Thread.sleep(200);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
                 }
-                
-                if (taskService != null) {
-                    try {
-                        DisplayInfoCache.getInstance().initialize(taskService);
-                        info = DisplayInfoCache.getInstance().getCachedInfo();
-                        rearScreenDpi = info.densityDpi;
-                        Log.d(TAG, "✓ 实时获取背屏DPI: " + rearScreenDpi);
-                    } catch (Exception e) {
-                        Log.e(TAG, "❌ 实时获取背屏DPI失败", e);
-                        return;
-                    }
-                } else {
-                    Log.e(TAG, "❌ TaskService重试3次后仍不可用，跳过DPI强制");
+
+                if (!initialized) {
+                    Log.e(TAG, "❌ Root重试3次后仍不可用，跳过DPI强制");
                     return;
                 }
             }
@@ -1038,19 +1011,18 @@ public class RearScreenNotificationActivity extends Activity {
                     return;
                 }
                 
-                // 获取TaskService
-                ITaskService taskService = NotificationService.getTaskService();
-                
-                if (taskService != null) {
-                    // 发送wakeup命令
+                // 以root权限发送wakeup命令
+                if (RootAccess.isAvailable()) {
                     try {
-                        taskService.executeShellCommand("input -d 1 keyevent KEYCODE_WAKEUP");
+                        // 走 submit（独立常驻会话、投递即返回）：这是 100ms 一次的高频
+                        // 保活命令，若与用户切屏共用主锁会造成切屏延迟与命令积压。
+                        ShellExecutor.submit("input -d 1 keyevent KEYCODE_WAKEUP");
                         Log.d(TAG, "✓ Wakeup sent");
                     } catch (Throwable t) {
                         Log.w(TAG, "发送wakeup失败: " + t.getMessage());
                     }
                 } else {
-                    Log.w(TAG, "⚠️ TaskService is null, skipping wakeup");
+                    Log.w(TAG, "⚠️ Root not available, skipping wakeup");
                 }
                 
                 // 100ms后继续

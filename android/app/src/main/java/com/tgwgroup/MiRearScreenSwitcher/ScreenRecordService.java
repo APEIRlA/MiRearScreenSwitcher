@@ -20,9 +20,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
-import android.content.ComponentName;
 import android.content.Intent;
-import android.content.ServiceConnection;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
@@ -38,7 +36,6 @@ import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 import androidx.core.app.NotificationCompat;
-import rikka.shizuku.Shizuku;
 
 /**
  * 背屏录屏服务
@@ -61,28 +58,6 @@ public class ScreenRecordService extends Service {
     private Handler wakeupHandler = new Handler(android.os.Looper.getMainLooper());
     private static final long WAKEUP_INTERVAL_MS = 100; // 每100ms唤醒一次背屏
     
-    // TaskService
-    private ITaskService taskService;
-    private final Shizuku.UserServiceArgs serviceArgs = 
-        new Shizuku.UserServiceArgs(new ComponentName("com.tgwgroup.MiRearScreenSwitcher", TaskService.class.getName()))
-            .daemon(false)
-            .processNameSuffix("task_service")
-            .debuggable(false)
-            .version(1);
-    
-    private final ServiceConnection taskServiceConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder binder) {
-            taskService = ITaskService.Stub.asInterface(binder);
-            Log.d(TAG, "✓ TaskService connected");
-        }
-        
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            taskService = null;
-        }
-    };
-    
     public static boolean isRunning() {
         return instance != null;
     }
@@ -97,9 +72,6 @@ public class ScreenRecordService extends Service {
         
         // 创建通知渠道
         createNotificationChannel();
-        
-        // 绑定TaskService
-        bindTaskService();
         
         // 启动前台通知
         startForeground(NOTIFICATION_ID, buildNotification());
@@ -125,31 +97,6 @@ public class ScreenRecordService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return null;
-    }
-    
-    private void bindTaskService() {
-        if (taskService != null) {
-            Log.d(TAG, "TaskService已连接，跳过绑定");
-            return;
-        }
-        
-        try {
-            if (!Shizuku.pingBinder()) {
-                Log.e(TAG, "❌ Shizuku不可用");
-                return;
-            }
-            
-            if (Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                Log.e(TAG, "❌ 无Shizuku权限");
-                return;
-            }
-            
-            Log.d(TAG, "→ 正在绑定TaskService...");
-            Shizuku.bindUserService(serviceArgs, taskServiceConnection);
-        } catch (Exception e) {
-            Log.e(TAG, "❌ 绑定TaskService失败", e);
-            e.printStackTrace();
-        }
     }
     
     private void createNotificationChannel() {
@@ -357,37 +304,17 @@ public class ScreenRecordService extends Service {
     }
     
     /**
-     * 确保TaskService连接
+     * 确保root权限可用
      */
     private boolean ensureTaskServiceConnected() {
-        if (taskService != null) {
-            Log.d(TAG, "✓ TaskService已连接");
+        if (RootAccess.isAvailable()) {
+            Log.d(TAG, "✓ Root权限已授权");
             return true;
         }
-        
-        Log.w(TAG, "⚠ TaskService未连接，尝试重新绑定...");
-        
-        // 尝试绑定
-        bindTaskService();
-        
-        // 等待连接（最多3秒）
-        int attempts = 0;
-        while (taskService == null && attempts < 30) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                break;
-            }
-            attempts++;
-        }
-        
-        if (taskService != null) {
-            Log.d(TAG, "✅ TaskService重连成功");
-            return true;
-        } else {
-            Log.e(TAG, "❌ TaskService重连失败（超时3秒）");
-            return false;
-        }
+
+        Log.w(TAG, "⚠ Root未授权");
+        Log.e(TAG, "❌ Root不可用");
+        return false;
     }
     
     /**
@@ -396,10 +323,12 @@ public class ScreenRecordService extends Service {
     private final Runnable wakeupRearScreenRunnable = new Runnable() {
         @Override
         public void run() {
-            if (isRecording && taskService != null) {
+            if (isRecording && RootAccess.isAvailable()) {
                 try {
                     // 向背屏(displayId=1)发送WAKEUP唤醒信号
-                    taskService.executeShellCommand("input -d 1 keyevent KEYCODE_WAKEUP");
+                    // 走 submit（独立常驻会话、投递即返回）：这是 100ms 一次的高频
+                    // 保活命令，若与用户切屏共用主锁会造成切屏延迟与命令积压。
+                    ShellExecutor.submit("input -d 1 keyevent KEYCODE_WAKEUP");
                     // 不输出日志以减少刷屏
                 } catch (Exception e) {
                     Log.w(TAG, "背屏唤醒失败: " + e.getMessage());
@@ -450,7 +379,7 @@ public class ScreenRecordService extends Service {
             
             // 启动录制前先发送一次keycode wakeup到背屏
             try {
-                taskService.executeShellCommand("input -d 1 keyevent KEYCODE_WAKEUP");
+                TaskService.executeShellCommand("input -d 1 keyevent KEYCODE_WAKEUP");
                 Thread.sleep(200); // 等待wakeup生效
             } catch (Exception e) {
                 Log.w(TAG, "启动前背屏keycode wakeup失败: " + e.getMessage());
@@ -463,12 +392,12 @@ public class ScreenRecordService extends Service {
                 currentVideoPath = "/storage/emulated/0/Movies/MRSS_" + timestamp + ".mp4";
                 
                 // 创建保存目录
-                taskService.executeShellCommand("mkdir -p /storage/emulated/0/Movies");
+                TaskService.executeShellCommand("mkdir -p /storage/emulated/0/Movies");
                 Log.d(TAG, "✓ 目录已创建");
                 
                 // 获取背屏的真实display ID（照抄截图逻辑）
                 String getDisplayIdCmd = "dumpsys SurfaceFlinger --display-id | grep -oE 'Display [0-9]+' | awk 'NR==2{print $2}'";
-                String displayId = taskService.executeShellCommandWithResult(getDisplayIdCmd);
+                String displayId = TaskService.executeShellCommandWithResult(getDisplayIdCmd);
                 
                 if (displayId == null || displayId.trim().isEmpty()) {
                     displayId = "1"; // 默认使用1
@@ -480,7 +409,7 @@ public class ScreenRecordService extends Service {
                 
                 // 先测试screenrecord命令是否可用
                 String testCmd = "which screenrecord";
-                String testResult = taskService.executeShellCommandWithResult(testCmd);
+                String testResult = TaskService.executeShellCommandWithResult(testCmd);
                 Log.d(TAG, "screenrecord路径: " + testResult);
                 
                 if (testResult == null || testResult.trim().isEmpty()) {
@@ -504,8 +433,8 @@ public class ScreenRecordService extends Service {
                 
                 Log.d(TAG, "→ 执行录屏命令: " + recordCmd);
                 
-                // 通过TaskService执行（有Shizuku权限）
-                boolean cmdSuccess = taskService.executeShellCommand(recordCmd);
+                // 通过TaskService执行（有root权限）
+                boolean cmdSuccess = TaskService.executeShellCommand(recordCmd);
                 Log.d(TAG, "命令执行结果: " + cmdSuccess);
                 
                 if (!cmdSuccess) {
@@ -520,7 +449,7 @@ public class ScreenRecordService extends Service {
                 Thread.sleep(800);
                 
                 // 读取PID
-                String pidStr = taskService.executeShellCommandWithResult("cat " + pidFile);
+                String pidStr = TaskService.executeShellCommandWithResult("cat " + pidFile);
                 Log.d(TAG, "PID文件内容: " + pidStr);
                 
                 if (pidStr != null && !pidStr.trim().isEmpty()) {
@@ -535,7 +464,7 @@ public class ScreenRecordService extends Service {
                 }
                 
                 // 读取启动日志查看错误
-                String logContent = taskService.executeShellCommandWithResult("cat " + logFile);
+                String logContent = TaskService.executeShellCommandWithResult("cat " + logFile);
                 if (logContent != null && !logContent.trim().isEmpty()) {
                     Log.d(TAG, "录屏进程日志: " + logContent);
                 }
@@ -545,18 +474,18 @@ public class ScreenRecordService extends Service {
                 
                 // 方法1: ps aux
                 String checkCmd1 = "ps -A | grep screenrecord";
-                String checkResult1 = taskService.executeShellCommandWithResult(checkCmd1);
+                String checkResult1 = TaskService.executeShellCommandWithResult(checkCmd1);
                 Log.d(TAG, "ps -A结果: " + checkResult1);
                 
                 // 方法2: ps -p
                 String checkCmd2 = "ps -p " + recordPid;
-                String checkResult2 = taskService.executeShellCommandWithResult(checkCmd2);
+                String checkResult2 = TaskService.executeShellCommandWithResult(checkCmd2);
                 Log.d(TAG, "ps -p结果: " + checkResult2);
                 
                 // 方法3: 检查文件是否开始生成
                 Thread.sleep(500);
                 String checkFile = "ls -l " + currentVideoPath;
-                String fileCheck = taskService.executeShellCommandWithResult(checkFile);
+                String fileCheck = TaskService.executeShellCommandWithResult(checkFile);
                 Log.d(TAG, "文件检查: " + fileCheck);
                 
                 // 如果进程在运行 或 文件已开始生成，认为成功
@@ -575,7 +504,7 @@ public class ScreenRecordService extends Service {
                     
                     // 检查错误原因
                     String errorCheck = "screenrecord --display-id 1 --help 2>&1 | head -n 5";
-                    String errorMsg = taskService.executeShellCommandWithResult(errorCheck);
+                    String errorMsg = TaskService.executeShellCommandWithResult(errorCheck);
                     Log.e(TAG, "错误信息: " + errorMsg);
                     
                     new Handler(Looper.getMainLooper()).post(() -> {
@@ -632,13 +561,13 @@ public class ScreenRecordService extends Service {
                     
                     // 发送SIGINT信号停止录制（优雅停止）
                     String killCmd = "kill -2 " + recordPid;
-                    boolean killed = taskService.executeShellCommand(killCmd);
+                    boolean killed = TaskService.executeShellCommand(killCmd);
                     
                     if (killed) {
                         Log.d(TAG, "✓ SIGINT信号已发送");
                     } else {
                         Log.w(TAG, "⚠ SIGINT失败，尝试SIGTERM");
-                        taskService.executeShellCommand("kill " + recordPid);
+                        TaskService.executeShellCommand("kill " + recordPid);
                     }
                     
                     Thread.sleep(1000); // 等待进程优雅退出并保存文件
@@ -651,12 +580,12 @@ public class ScreenRecordService extends Service {
                     
                     // 验证文件是否存在
                     String checkFile = "ls -lh " + currentVideoPath;
-                    String fileInfo = taskService.executeShellCommandWithResult(checkFile);
+                    String fileInfo = TaskService.executeShellCommandWithResult(checkFile);
                     Log.d(TAG, "文件信息: " + fileInfo);
                     
                     // 刷新媒体库
                     String refreshCmd = "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://" + currentVideoPath;
-                    taskService.executeShellCommand(refreshCmd);
+                    TaskService.executeShellCommand(refreshCmd);
                     Log.d(TAG, "✓ 媒体库已刷新");
                     
                     // 更新通知和Toast
@@ -715,16 +644,6 @@ public class ScreenRecordService extends Service {
             } catch (Exception e) {
                 Log.e(TAG, "移除悬浮窗失败", e);
             }
-        }
-        
-        // 解绑TaskService
-        if (taskService != null) {
-            try {
-                Shizuku.unbindUserService(serviceArgs, taskServiceConnection, true);
-            } catch (Exception e) {
-                Log.e(TAG, "解绑TaskService失败", e);
-            }
-            taskService = null;
         }
         
         instance = null;
