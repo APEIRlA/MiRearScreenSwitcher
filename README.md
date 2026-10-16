@@ -229,7 +229,7 @@ flutter build apk --release --split-per-abi --target-platform android-arm64
 
 验证机型：
 
-- 小米 17 Pro Max（2509FPN0BC），HyperOS，Android 16，arm64-v8a，KernelSU（ksud 3.3.0）
+- 小米 17 Pro Max（2509FPN0BC），HyperOS 4.0.2.0.XPBCNXM.D01（Android 17，安全更新 2026 年 10 月 1 日），arm64-v8a，KernelSU（ksud 3.3.0）
 
 ### V3.3.0（ROOT 版）
 
