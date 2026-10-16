@@ -38,14 +38,22 @@ public final class RootAccess {
     }
 
     /**
-     * root 是否可用（结果缓存）。
+     * root 是否可用。
+     *
+     * <p>成功结果会缓存；失败结果**不缓存**，每次调用都重新检测。原因：KernelSU /
+     * Magisk 的授权是按 uid 记录的，App 被覆盖安装（uid 变化）或授权记录被清后，
+     * 首次检测会失败；若把失败也缓存下来，之后所有依赖 root 的 URI 命令都会静默
+     * 失效（实测：UriCommandService 报「❌ TaskService未连接」后直接 return，
+     * 用户看不到任何提示）。
      *
      * @return 已获得 root 授权返回 true，否则返回 false
      */
     public static synchronized boolean isAvailable() {
-        if (cached != null) {
-            return cached;
+        // 已确认拿到过 root：直接复用缓存
+        if (Boolean.TRUE.equals(cached)) {
+            return true;
         }
+        boolean available = false;
         try {
             Process process = new ProcessBuilder("su", "-c", "id").start();
             BufferedReader reader = new BufferedReader(
@@ -54,12 +62,16 @@ public final class RootAccess {
             String line = reader.readLine();
             reader.close();
             process.waitFor();
-            cached = (line != null && line.contains("uid=0"));
+            available = (line != null && line.contains("uid=0"));
+            if (!available) {
+                Log.w(TAG, "root 检测未通过（输出无 uid=0），不缓存失败结果，下次仍会重试");
+            }
         } catch (Exception e) {
             Log.w(TAG, "Root check failed", e);
-            cached = false;
+            available = false;
         }
-        return cached;
+        cached = available;
+        return available;
     }
 
     /** 重置缓存（例如用户刚刚授权后需要重新检测）。 */

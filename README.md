@@ -33,8 +33,6 @@ Shizuku 版今后不再更新，但会一直可用。新功能和后续的问题
 - 快捷切换：控制中心快捷开关，一键把应用切到背屏
 - 背屏截图：一键截取背屏画面，存入相册
 - 背屏录屏：悬浮窗控制，录制背屏画面并存入 Movies 目录
-- 充电动画：插电时在背屏显示动画，3D 闪电加流动液体效果
-- 通知推送：收到通知时在背屏显示内容
 - 后台可用：应用在后台也能触发切换
 - 背屏常亮：可选，防止背屏自动息屏
 - 背屏旋转：支持 0°、90°、180° 和 270° 四个方向，旋转后应用自动恢复
@@ -97,11 +95,6 @@ Shizuku 版今后不再更新，但会一直可用。新功能和后续的问题
 - 点击通知“点击将应用切换回主屏”
 - 或者在背屏退出应用，通知自动消失
 
-充电动画和通知：
-
-- 充电动画：插电时自动显示，可在应用内关闭
-- 通知推送：在应用内启用，选择要推送的应用。支持隐私模式、跟随勿扰模式、仅倒扣手机时通知，自动销毁时间可自定义
-
 调整背屏显示：
 
 - DPI 调整：在应用内设置，推荐 260 到 350
@@ -113,8 +106,6 @@ Shizuku 版今后不再更新，但会一直可用。新功能和后续的问题
 
 - 应用在后台或已退出，快捷开关依然可用
 - MRSS 不出现在最近任务列表，避免误清理
-- 应用退出或切换时，通知自动清除
-- 充电动画和通知推送可以分别开关
 - 支持 URI 调用，例如 `mrss://switch?current=1`
 
 ## 技术实现
@@ -126,25 +117,16 @@ Shizuku 版今后不再更新，但会一直可用。新功能和后续的问题
 - Quick Settings Tile：系统级快捷开关，承载切换、截图、录屏
 - ActivityTaskManager：通过 system service 调用实现显示切换
 - Foreground Service 加 WakeLock：前台服务持有唤醒锁，支撑背屏常亮
-- NotificationListenerService：监听系统通知，推送到背屏
 - Keycode Wakeup：用 `input keyevent KEYCODE_WAKEUP` 唤醒背屏
 - Media Scanner：刷新媒体库，截图和录制出现在相册
-- 智能监控：每 2 秒检测背屏前台应用，自动清除无效通知
-- 充电监听：BroadcastReceiver 监听充电事件，触发背屏动画
 - 3D 动画：自定义 Canvas 绘制，非线性动画，重力感应液体效果
-- 接近传感器检测：主屏接近传感器实时检测，支撑倒扣手机时通知
-- 截图和录屏：screencap 截图，screenrecord 录屏
 - URI 协议：支持 `mrss://` 外部调用
 
 ## 权限说明
 
 - `android.permission.WAKE_LOCK`：保持背屏常亮
 - `android.permission.FOREGROUND_SERVICE`：前台服务权限
-- `android.permission.POST_NOTIFICATIONS`：通知权限，Android 13 及以上
-- `android.permission.BIND_NOTIFICATION_LISTENER_SERVICE`：通知监听服务，可选
 - `android.permission.SYSTEM_ALERT_WINDOW`：悬浮窗权限，录屏功能需要
-- `android.permission.QUERY_ALL_PACKAGES`：获取应用列表，通知功能需要
-- 系统广播接收：监听 `ACTION_POWER_CONNECTED` 和 `ACTION_POWER_DISCONNECTED` 充电事件
 
 Shizuku 版另外需要 `moe.shizuku.manager.permission.API_V23`，用于执行特权操作。
 
@@ -175,25 +157,7 @@ flutter build apk --release --split-per-abi --target-platform android-arm64
    - 自动结束系统 Launcher，防止挤占
    - Toast 显示具体应用名
 
-2. 充电动画
-
-   - 插电时自动在背屏显示
-   - 3D 玻璃闪电容器加流动绿色液体
-   - 重力感应液体效果
-   - 非线性动画，从 0% 填充到当前电量
-   - 可在应用内开关，支持常亮模式
-
-3. 通知推送
-
-   - NotificationListenerService 监听系统通知
-   - 选择要推送的应用，支持搜索和批量选择
-   - 背屏显示应用图标、标题和内容
-   - 隐私模式隐藏通知具体内容
-   - 动画效果：图标缩放加内容淡入
-   - 自动销毁时间可自定义
-   - 开关状态持久化，重启后恢复
-
-4. 背屏录屏
+2. 背屏录屏
 
    - 悬浮窗控制，红色圆形和方形按钮
    - 用 screenrecord 录制背屏画面
@@ -201,39 +165,39 @@ flutter build apk --release --split-per-abi --target-platform android-arm64
    - 视频存入 Movies/MRSS_*.mp4
    - 悬浮窗位置可拖动
 
-5. 前台 Service 保活
+3. 前台 Service 保活
 
    - 统一的“MRSS 内核服务”前台通知
    - 可选的背屏常亮，基于 `FLAG_KEEP_SCREEN_ON`
    - 点击通知可快速返回主屏
    - 主应用隐藏于最近任务，防止误清理
 
-6. 智能监控与清理
+4. 智能监控与清理
 
    - 每 2 秒检测背屏前台应用状态
    - 应用退出或切换时停止服务并清除通知
    - 防止多应用同时投放
 
-7. DPI 动态调整
+5. DPI 动态调整
 
    - 实时调整背屏显示密度
    - 用 `wm density` 命令修改
    - 一键还原默认设置
    - 推荐范围 260 到 350
 
-8. 背屏旋转控制
+6. 背屏旋转控制
 
    - 支持 0°、90°、180° 和 270°
    - 用 `wm user-rotation -d 1` 独立控制背屏
    - 旋转后应用自动恢复
    - 实时显示当前旋转状态
 
-9. 背屏遮盖检测
+7. 背屏遮盖检测
 
    - 可选的接近传感器检测
    - 在应用内开关
 
-10. URI 协议
+8. URI 协议
 
     - `mrss://switch?current=1`：切换当前应用
     - `mrss://switch?packageName=xxx`：切换指定应用
@@ -249,6 +213,23 @@ flutter build apk --release --split-per-abi --target-platform android-arm64
 - APK 体积优化
 
 ## 更新日志
+
+### V3.7.0
+
+删除功能：
+
+- 删除充电动画与充电动画常亮。HyperOS 自带充电特效，功能重复，且常亮模式有烧屏风险。
+- 删除背屏通知推送。HyperOS 已有背屏通知，不再重复实现。
+
+调整：
+
+- 首页底部的使用教程、作者信息、团队信息、打赏和交流群入口，合并为一个项目主页入口，统一跳转 GitHub。
+- 移除通知权限 POST_NOTIFICATIONS、通知监听服务和 QUERY_ALL_PACKAGES 权限，安装时申请更少。
+- 清理相应代码、资源和多语言文案，APK 体积下降。
+
+验证机型：
+
+- 小米 17 Pro Max（2509FPN0BC），HyperOS，Android 16，arm64-v8a，KernelSU（ksud 3.3.0）
 
 ### V3.3.0（ROOT 版）
 
@@ -350,19 +331,18 @@ V3.0.0 以前的所有版本继续按 MIT 协议自由使用。
 作者：AntiOblivionis
 
 - QQ：319641317
-- 酷安：[@AntiOblivionis](http://www.coolapk.com/u/8158212)
-- Github：[GoldenglowSusie](https://github.com/GoldenglowSusie/)
+- Github：[APEIRlA](https://github.com/APEIRlA/)
+- 项目主页：[MiRearScreenSwitcher](https://github.com/APEIRlA/MiRearScreenSwitcher)
+- 问题反馈：[Issues](https://github.com/APEIRlA/MiRearScreenSwitcher/issues)
 - Bilibili：[罗德岛T0驭械术师澄闪](https://space.bilibili.com/407059627)
 
 首席测试官：汐木泽
 
-- 酷安：[@汐木泽](http://www.coolapk.com/u/4279097)
 - 提供关键测试反馈和功能建议
 
 交流与支持：
 
-- QQ 交流群：932738927，[加入群聊](https://tgwgroup.ltd/2025/10/21/%e5%85%b3%e4%ba%8emrss%e4%ba%a4%e6%b5%81%e7%be%a4/)
-- 打赏支持：[请作者喝杯咖啡](https://tgwgroup.ltd/2025/10/19/%e5%85%b3%e4%ba%8e%e6%89%93%e8%b5%8f/)
+问题反馈和建议统一走 GitHub Issues，不再维护 QQ 群和打赏渠道。
 
 ## AI 协作开发
 
@@ -385,7 +365,6 @@ V3.0.0 以前的所有版本继续按 MIT 协议自由使用。
 
 1. 应用图标：本应用图标直接使用小米 HyperOS 系统中的图标资源。根据[小米操作系统用户协议](https://terms.miui.com/doc/eula/cn.html)，小米、MIUI、Xiaomi HyperOS 等商标及相关图标的版权归小米科技有限责任公司所有。本应用为第三方辅助工具，与小米官方无关。如有侵权请联系删除。
 
-2. 酷安图标：应用内使用的酷安图标归酷安（北京酷安网络科技有限公司）所有。根据[酷安用户协议](https://m.coolapk.com/mp/user/agreement)，酷安的商标、图标等知识产权归其所有。本应用使用酷安图标仅用于跳转链接标识，与酷安没有官方合作关系。
 
 ### 免责声明
 

@@ -55,6 +55,8 @@ public class ScreenRecordService extends Service {
     private boolean isRecording = false;
     private String currentVideoPath;
     private int recordPid = -1; // 录屏进程ID
+    // 是否由本次录屏点亮了背屏（③ 息屏捕获，issue #24）；只有自己点亮的才在停止时关回去
+    private boolean rearEnabledByUs = false;
     private Handler wakeupHandler = new Handler(android.os.Looper.getMainLooper());
     private static final long WAKEUP_INTERVAL_MS = 100; // 每100ms唤醒一次背屏
     
@@ -395,17 +397,17 @@ public class ScreenRecordService extends Service {
                 TaskService.executeShellCommand("mkdir -p /storage/emulated/0/Movies");
                 Log.d(TAG, "✓ 目录已创建");
                 
-                // 获取背屏的真实display ID（照抄截图逻辑）
-                String getDisplayIdCmd = "dumpsys SurfaceFlinger --display-id | grep -oE 'Display [0-9]+' | awk 'NR==2{print $2}'";
-                String displayId = TaskService.executeShellCommandWithResult(getDisplayIdCmd);
-                
-                if (displayId == null || displayId.trim().isEmpty()) {
-                    displayId = "1"; // 默认使用1
-                    Log.w(TAG, "⚠ 未能获取display ID，使用默认值: 1");
-                } else {
-                    displayId = displayId.trim();
-                    Log.d(TAG, "✓ 背屏display ID: " + displayId);
+                // ③ 息屏状态背屏捕获（issue #24）：背屏息屏时 screenrecord 只能录到全黑帧，
+                // 需先用 root 权限强制点亮背屏。只有本次点亮的才负责在停止时关回去。
+                if (!TaskService.isRearDisplayOn()) {
+                    Log.i(TAG, "背屏处于息屏状态，先用 root 权限强制点亮以便录制画面");
+                    TaskService.executeShellCommand("cmd display enable-display 1");
+                    rearEnabledByUs = true;
                 }
+                
+                // screenrecord 的 --display-id 只认 SurfaceFlinger 物理显示 ID，不是逻辑 displayId（与截图侧同一套解析）
+                String displayId = TaskService.resolveRearSfDisplayId();
+                Log.d(TAG, "✓ 背屏SurfaceFlinger显示ID: " + displayId);
                 
                 // 先测试screenrecord命令是否可用
                 String testCmd = "which screenrecord";
@@ -503,7 +505,7 @@ public class ScreenRecordService extends Service {
                     Log.e(TAG, "❌ 录屏进程未启动");
                     
                     // 检查错误原因
-                    String errorCheck = "screenrecord --display-id 1 --help 2>&1 | head -n 5";
+                    String errorCheck = "screenrecord --display-id " + displayId + " --help 2>&1 | head -n 5";
                     String errorMsg = TaskService.executeShellCommandWithResult(errorCheck);
                     Log.e(TAG, "错误信息: " + errorMsg);
                     
@@ -575,6 +577,12 @@ public class ScreenRecordService extends Service {
                     isRecording = false;
                     recordPid = -1;
                     
+                    // ③ 息屏捕获：背屏若是本次录制点亮的，录完就关回去，避免背屏一直亮着
+                    if (rearEnabledByUs) {
+                        rearEnabledByUs = false;
+                        TaskService.executeShellCommand("cmd display disable-display 1");
+                        Log.i(TAG, "背屏已由本次录屏点亮，现已关闭");
+                    }
                     // 停止背屏持续唤醒
                     stopRearScreenWakeup();
                     

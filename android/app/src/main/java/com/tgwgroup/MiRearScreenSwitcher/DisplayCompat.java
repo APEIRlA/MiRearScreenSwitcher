@@ -63,14 +63,53 @@ public final class DisplayCompat {
     }
 
     /**
-     * 构造"把任务移动到指定屏幕"的 shell 命令。
+     * 构造「把任务移动到指定屏幕」的 shell 命令。
      *
-     * @param taskId    目标任务 id（Android 15+ 的语义是 rootTaskId）
+     * <p><b>V3.6.5 起已废弃，禁止再调用。</b>实测（Android 17 / 澎湃 OS 4.0.2，2509FPN0BC）：
+     * {@code service call activity_task 51} 不只是「搬不动 task」，它会把 task 搬进损坏状态，
+     * 之后 system_server 遍历 Task 树时遇到 {@code parent == null} 的孤儿 Task，
+     * {@code Task.getTopResumedActivity()} 抛 NPE → system_server 死亡 → 手机软重启。
+     * 崩溃栈固定为 {@code TaskDisplayArea.getFocusedActivity} / {@code DisplayContent.sleepIfNeeded} /
+     * {@code PowerManagerServiceImpl.updateForegroundApp}。
+     *
+     * <p>请改用 {@link #moveStackCommand(int, int)} 或 {@code TaskService.moveTaskToDisplay}
+     * （后者带回读校验，不会出现返回成功但 task 没搬的情况）。
+     *
+     * <p>历史：V3.6.1 曾把它判定为「无效但无害」而保留为 move-stack 的兜底路径，
+     * 后被对照实验证实为软重启根因，兜底路径已移除。
+     *
+     * @deprecated 会导致 system_server NPE 崩溃与手机软重启，请改用 {@link #moveStackCommand(int, int)}
+     */
+    @Deprecated
+    public static String moveTaskCommand(int taskId, int displayId) {
+        // 澎湃 OS / MIUI 定制的 IActivityTaskManager 上 transaction 51 的参数顺序是 (displayId, rootTaskId)，
+        // 与 AOSP 的 moveRootTaskToDisplay(int rootTaskId, int displayId) 相反。
+        // 实测（Android 17 / OS4.0，2509FPN0BC）：i32 <rootTaskId> i32 <displayId> 报
+        // "moveTaskToRootTask: No rootTask for taskId=<displayId>"，反序才成功。
+        return "service call activity_task " + moveTaskTransactionCode()
+                + " i32 " + displayId + " i32 " + taskId;
+    }
+
+    /**
+     * 构造"把任务移动到指定屏幕"的 shell 命令（Android 10+ 的 am 子命令）。
+     *
+     * <p><b>V3.6.1 起这是首选路径。</b>实测（Android 17 / 澎湃 OS 4.0，机型 2509FPN0BC）：
+     * {@code service call activity_task 51} 在 MIUI 定制的 IActivityTaskManager 上
+     * 两种参数顺序都搬不动 task——
+     * <ul>
+     *   <li>正序 {@code (rootTaskId, displayId)}：binder 返回错误串
+     *       {@code moveTaskToRootTask: No rootTask for taskId=<displayId>}；</li>
+     *   <li>反序 {@code (displayId, rootTaskId)}：返回 {@code Parcel(00000000)}，
+     *       进程退出码 0，但 task 仍在原屏幕上（退出码只反映 service call 本身，
+     *       binder 业务失败同样 exit=0，极易误判为成功）。</li>
+     * </ul>
+     * 而 {@code am display move-stack} 稳定生效，且 shell 身份即可执行、无需 root。
+     *
+     * @param taskId    目标任务 id（全屏场景下与 RootTask id 相同）
      * @param displayId 目标屏幕，1 为背屏、0 为主屏
      * @return 可直接交给 {@code sh -c} 执行的命令
      */
-    public static String moveTaskCommand(int taskId, int displayId) {
-        return "service call activity_task " + moveTaskTransactionCode()
-                + " i32 " + taskId + " i32 " + displayId;
+    public static String moveStackCommand(int taskId, int displayId) {
+        return "am display move-stack " + taskId + " " + displayId;
     }
 }

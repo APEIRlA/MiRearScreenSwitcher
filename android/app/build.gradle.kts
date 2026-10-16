@@ -54,6 +54,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 与 release 同一签名：debug 可 -r 覆盖安装而不改变应用 uid。
+            // KernelSU 按 uid 授权，卸载重装会让 uid 递增导致授权失效。
+            signingConfig = signingConfigs.getByName("release")
+        }
+
         release {
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")

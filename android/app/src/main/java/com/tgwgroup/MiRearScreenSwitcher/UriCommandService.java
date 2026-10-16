@@ -101,11 +101,9 @@ public class UriCommandService extends IntentService {
 
                 if (rearForegroundApp != null && !rearForegroundApp.isEmpty()) {
                     // 排除允许的进程：
-                    // 1. MRSS自己的Activity（充电动画、通知动画、唤醒等）
+                    // 1. MRSS自己的唤醒Activity
                     // 2. 小米官方Launcher（com.xiaomi.subscreencenter.SubScreenLauncher）
-                    if (!rearForegroundApp.contains("RearScreenChargingActivity") &&
-                            !rearForegroundApp.contains("RearScreenNotificationActivity") &&
-                            !rearForegroundApp.contains("RearScreenWakeupActivity") &&
+                    if (!rearForegroundApp.contains("RearScreenWakeupActivity") &&
                             !rearForegroundApp.contains("com.xiaomi.subscreencenter")) {
                         Log.w(TAG, "❌ 背屏已有应用在运行: " + rearForegroundApp);
                         Log.d(TAG, "════════════════════════════════════════");
@@ -196,9 +194,7 @@ public class UriCommandService extends IntentService {
                 String rearForegroundApp = TaskService.getForegroundAppOnDisplay(1);
                 if (rearForegroundApp != null && !rearForegroundApp.isEmpty()) {
                     // 排除允许的进程
-                    if (!rearForegroundApp.contains("RearScreenChargingActivity") &&
-                            !rearForegroundApp.contains("RearScreenNotificationActivity") &&
-                            !rearForegroundApp.contains("RearScreenWakeupActivity") &&
+                    if (!rearForegroundApp.contains("RearScreenWakeupActivity") &&
                             !rearForegroundApp.contains("com.xiaomi.subscreencenter")) {
                         Log.w(TAG, "❌ 背屏已有其他应用: " + rearForegroundApp);
                         return;
@@ -228,9 +224,14 @@ public class UriCommandService extends IntentService {
                         MODE_PRIVATE);
                 boolean keepScreenOnEnabled = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
                 serviceIntent.putExtra("keepScreenOnEnabled", keepScreenOnEnabled);
+
+                // V3.6: 传递被投应用保活开关状态
+                boolean keepAliveEnabled = prefs.getBoolean("flutter.keep_alive_enabled", true);
+                serviceIntent.putExtra("keepAliveEnabled", keepAliveEnabled);
             } catch (Exception e) {
                 // 默认为开启
                 serviceIntent.putExtra("keepScreenOnEnabled", true);
+                serviceIntent.putExtra("keepAliveEnabled", true);
             }
 
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -431,8 +432,13 @@ public class UriCommandService extends IntentService {
                         MODE_PRIVATE);
                 boolean keepScreenOnEnabled = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
                 serviceIntent.putExtra("keepScreenOnEnabled", keepScreenOnEnabled);
+
+                // V3.6: 传递被投应用保活开关状态
+                boolean keepAliveEnabled = prefs.getBoolean("flutter.keep_alive_enabled", true);
+                serviceIntent.putExtra("keepAliveEnabled", keepAliveEnabled);
             } catch (Exception e) {
                 serviceIntent.putExtra("keepScreenOnEnabled", true);
+                serviceIntent.putExtra("keepAliveEnabled", true);
             }
 
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -633,16 +639,19 @@ public class UriCommandService extends IntentService {
      * 处理截图命令
      */
     private void handleScreenshot() {
+        boolean success = false;
         try {
-            boolean success = TaskService.takeRearScreenshot();
-
-            // 无论成功失败都显示成功Toast
-            Log.d(TAG, "✅ 截图命令已执行");
-            showToast(getString(R.string.toast_screenshot_saved));
+            success = TaskService.takeRearScreenshot();
+            if (success) {
+                Log.d(TAG, "✅ 截图命令已执行");
+                showToast(getString(R.string.toast_screenshot_saved));
+            } else {
+                Log.w(TAG, "⚠️ 背屏截图未捕获到有效内容");
+                showToast("背屏截图失败：未捕获到有效画面");
+            }
         } catch (Exception e) {
             Log.e(TAG, "截图命令失败", e);
-            // 即使异常也显示成功Toast
-            showToast(getString(R.string.toast_screenshot_saved));
+            showToast("背屏截图失败：" + e.getMessage());
         }
     }
 
